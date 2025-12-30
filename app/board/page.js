@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../lib/supabase";
+
 
 // Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
