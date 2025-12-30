@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-function Cell({ isMe, label }) {
+const SYMBOL = {
+  unknown: "?",
+  empty: "X",
+  corpse: "†",
+  blocked: "⛔",
+};
+
+function Cell({ isMe, value, label }) {
   return (
     <div
       style={{
@@ -13,7 +20,7 @@ function Cell({ isMe, label }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontWeight: 700,
+        fontWeight: 800,
         background: isMe ? "#2d6a4f" : "#111",
         color: isMe ? "#fff" : "#ddd",
         borderRadius: 6,
@@ -21,13 +28,14 @@ function Cell({ isMe, label }) {
       }}
       title={label}
     >
-      {isMe ? "ME" : ""}
+      {value}
     </div>
   );
 }
 
 export default function BoardPage() {
   const [player, setPlayer] = useState(null);
+  const [tiles, setTiles] = useState([]);
   const [msg, setMsg] = useState("Cargando...");
 
   useEffect(() => {
@@ -38,37 +46,37 @@ export default function BoardPage() {
         return;
       }
 
-      const { data, error } = await supabase
+      const { data: p, error: pErr } = await supabase
         .from("players")
         .select("id, name, row, col, game_id, alive, lives, is_gm")
         .maybeSingle();
 
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-      if (!data) {
-        setMsg("No hay jugador creado. Ve a /me y crea tu player.");
-        return;
-      }
-      if (!data.game_id) {
-        setMsg("Tu jugador no tiene game_id. Asócialo a una partida en Supabase.");
-        setPlayer(data);
-        return;
-      }
-      if (data.row == null || data.col == null) {
-        setMsg("Tu jugador no tiene posición (row/col). Asigna row/col en Supabase.");
-        setPlayer(data);
-        return;
+      if (pErr) return setMsg(pErr.message);
+      if (!p) return setMsg("No hay jugador creado. Ve a /me");
+      if (!p.game_id) {
+        setPlayer(p);
+        return setMsg("Tu jugador no tiene game_id. Asócialo a una partida en Supabase.");
       }
 
-      setPlayer(data);
+      setPlayer(p);
+
+      const { data: t, error: tErr } = await supabase
+        .from("player_map_tiles")
+        .select("row, col, tile_state")
+        .eq("player_id", p.id)
+        .eq("game_id", p.game_id);
+
+      if (tErr) return setMsg(tErr.message);
+      setTiles(t || []);
       setMsg("");
     }
+
     run();
   }, []);
 
   const size = 8;
+  const key = (r, c) => `${r}-${c}`;
+  const tileMap = new Map(tiles.map((t) => [key(t.row, t.col), t.tile_state]));
 
   return (
     <main style={{ padding: 24, fontFamily: "sans-serif" }}>
@@ -105,20 +113,32 @@ export default function BoardPage() {
             const row = r + 1;
             const col = c + 1;
             const isMe = player && player.row === row && player.col === col;
+
+            const state = tileMap.get(key(row, col)) || "unknown";
+            const value = isMe ? "ME" : (SYMBOL[state] || "?");
+
             return (
               <Cell
                 key={`${row}-${col}`}
                 isMe={isMe}
-                label={`(${row}, ${col})`}
+                value={value}
+                label={`(${row}, ${col}) state=${state}`}
               />
             );
           })
         )}
       </div>
 
-      <p style={{ marginTop: 16, color: "#666" }}>
-        Nota: por ahora solo mostramos tu posición. Después agregamos objetos, cadáveres y niebla.
-      </p>
+      <div style={{ marginTop: 16, color: "#666" }}>
+        <div><b>Leyenda:</b></div>
+        <div>? = desconocido</div>
+        <div>X = vacío</div>
+        <div>† = cadáver</div>
+        <div>⛔ = bloqueado (cataclismo)</div>
+        <div style={{ marginTop: 8 }}>
+          Nota: todavía no editamos estados desde la web. Eso es el paso siguiente.
+        </div>
+      </div>
     </main>
   );
 }
