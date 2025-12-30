@@ -44,7 +44,8 @@ function Cell({ isMe, value, label, onSet }) {
       }}
       title={label}
     >
-      {value}
+      {isMe ? "ME" : value}
+
     </div>
   );
 }
