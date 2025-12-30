@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
+// Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
   unknown: "?",
   empty: "X",
@@ -10,9 +11,22 @@ const SYMBOL = {
   blocked: "⛔",
 };
 
-function Cell({ isMe, value, label, onSet }) {   return (     <div       onClick={(e) => {         e.preventDefault();         if (e.shiftKey) onSet("blocked");         else onSet("empty");       }}       onContextMenu={(e) => {         e.preventDefault();         onSet("corpse");       }}       onDoubleClick={(e) => {         e.preventDefault();         onSet("unknown");       }}       style={{         width: 42,         height: 42,         border: "1px solid #333",         display: "flex",         alignItems: "center",         justifyContent: "center",         fontWeight: 800,         background: isMe ? "#2d6a4f" : "#111",         color: isMe ? "#fff" : "#ddd",         borderRadius: 6,         cursor: "pointer",         userSelect: "none",       }}       title={label}     >       {value}     </div>   ); }
+function Cell({ isMe, value, label, onSet }) {
   return (
     <div
+      onClick={(e) => {
+        e.preventDefault();
+        if (e.shiftKey) onSet("blocked");
+        else onSet("empty");
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onSet("corpse");
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        onSet("unknown");
+      }}
       style={{
         width: 42,
         height: 42,
@@ -24,6 +38,7 @@ function Cell({ isMe, value, label, onSet }) {   return (     <div       onClick
         background: isMe ? "#2d6a4f" : "#111",
         color: isMe ? "#fff" : "#ddd",
         borderRadius: 6,
+        cursor: "pointer",
         userSelect: "none",
       }}
       title={label}
@@ -36,130 +51,81 @@ function Cell({ isMe, value, label, onSet }) {   return (     <div       onClick
 export default function BoardPage() {
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
-  const [msg, setMsg] = useState("Cargando...");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const size = 8;
+
+  // Diccionario rápido para lookup de casillas
+  const tilesByRC = useMemo(() => {
+    const m = new Map();
+    for (const t of tiles) m.set(`${t.row}-${t.col}`, t);
+    return m;
+  }, [tiles]);
 
   useEffect(() => {
-    async function run() {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
-        setMsg("No estás logueado. Ve a /login");
+    let mounted = true;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+      setMsg("");
+
+      // 1) Usuario autenticado
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr) {
+        if (mounted) {
+          setError(authErr.message || "Error al obtener usuario");
+          setLoading(false);
+        }
         return;
       }
 
-      const { data: p, error: pErr } = await supabase
-        .from("players")
-        .select("id, name, row, col, game_id, alive, lives, is_gm")
-        .maybeSingle();
-
-      if (pErr) return setMsg(pErr.message);
-      if (!p) return setMsg("No hay jugador creado. Ve a /me");
-      if (!p.game_id) {
-        setPlayer(p);
-        return setMsg("Tu jugador no tiene game_id. Asócialo a una partida en Supabase.");
+      const user = authData?.user;
+      if (!user) {
+        if (mounted) {
+          setError("No estás logueado");
+          setLoading(false);
+        }
+        return;
       }
 
-      setPlayer(p);
+      // 2) Player row (debe existir ya en tu app)
+      const { data: p, error: pErr } = await supabase
+        .from("players")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
+      if (pErr) {
+        if (mounted) {
+          setError(pErr.message);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (!p) {
+        if (mounted) {
+          setError(
+            "No existe registro en 'players' para este usuario. (Tu /me suele crearlo automáticamente.)"
+          );
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (mounted) setPlayer(p);
+
+      // 3) Si aún no hay game_id, mostramos mensaje
+      if (!p.game_id) {
+        if (mounted) {
+          setTiles([]);
+          setLoading(false);
+        }
+        return;
+      }
+
+      // 4) Cargar tiles del mapa personal
       const { data: t, error: tErr } = await supabase
-        .from("player_map_tiles")
-        .select("row, col, tile_state")
-        .eq("player_id", p.id)
-        .eq("game_id", p.game_id);
-
-      if (tErr) return setMsg(tErr.message);
-      setTiles(t || []);
-      setMsg("");
-    }
-
-    run();
-  }, []);
-
-  const size = 8;
-  const key = (r, c) => `${r}-${c}`;
-  const tileMap = new Map(tiles.map((t) => [key(t.row, t.col), t.tile_state]));
-async function setTileState(row, col, state) {
-  if (!player?.is_gm) return;
-
-  await supabase
-    .from("player_map_tiles")
-    .update({ tile_state: state })
-    .eq("player_id", player.id)
-    .eq("game_id", player.game_id)
-    .eq("row", row)
-    .eq("col", col);
-
-  setTiles((prev) =>
-    prev.map((t) =>
-      t.row === row && t.col === col
-        ? { ...t, tile_state: state }
-        : t
-    )
-  );
-}
-
-  return (
-    <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <h1>Tablero 8×8</h1>
-
-      {msg && (
-        <p style={{ padding: 12, background: "#fff3cd", borderRadius: 8 }}>
-          {msg}
-        </p>
-      )}
-
-      {player && (
-        <div style={{ marginBottom: 16 }}>
-          <div><b>Jugador:</b> {player.name}</div>
-          <div><b>Posición:</b> row {player.row}, col {player.col}</div>
-          <div><b>Vidas:</b> {player.lives} — <b>Vivo:</b> {String(player.alive)}</div>
-          <div><b>GM:</b> {String(player.is_gm)}</div>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${size}, 42px)`,
-          gap: 6,
-          padding: 12,
-          background: "#000",
-          borderRadius: 12,
-          width: "fit-content",
-        }}
-      >
-        {Array.from({ length: size }).map((_, r) =>
-          Array.from({ length: size }).map((__, c) => {
-            const row = r + 1;
-            const col = c + 1;
-            const isMe = player && player.row === row && player.col === col;
-
-            const state = tileMap.get(key(row, col)) || "unknown";
-            const value = isMe ? "ME" : (SYMBOL[state] || "?");
-
-            return (
-              <Cell
-  key={`${row}-${col}`}
-  isMe={isMe}
-  value={value}
-  label={`(${row}, ${col}) state=${state}`}
-  onSet={(newState) => setTileState(row, col, newState)}
-/>
-
-            );
-          })
-        )}
-      </div>
-
-      <div style={{ marginTop: 16, color: "#666" }}>
-        <div><b>Leyenda:</b></div>
-        <div>? = desconocido</div>
-        <div>X = vacío</div>
-        <div>† = cadáver</div>
-        <div>⛔ = bloqueado (cataclismo)</div>
-        <div style={{ marginTop: 8 }}>
-          Nota: todavía no editamos estados desde la web. Eso es el paso siguiente.
-        </div>
-      </div>
-    </main>
-  );
-}
