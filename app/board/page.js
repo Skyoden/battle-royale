@@ -10,7 +10,7 @@ const SYMBOL = {
   blocked: "⛔",
 };
 
-function Cell({ isMe, value, label }) {
+function Cell({ isMe, value, label, onSet }) {   return (     <div       onClick={(e) => {         e.preventDefault();         if (e.shiftKey) onSet("blocked");         else onSet("empty");       }}       onContextMenu={(e) => {         e.preventDefault();         onSet("corpse");       }}       onDoubleClick={(e) => {         e.preventDefault();         onSet("unknown");       }}       style={{         width: 42,         height: 42,         border: "1px solid #333",         display: "flex",         alignItems: "center",         justifyContent: "center",         fontWeight: 800,         background: isMe ? "#2d6a4f" : "#111",         color: isMe ? "#fff" : "#ddd",         borderRadius: 6,         cursor: "pointer",         userSelect: "none",       }}       title={label}     >       {value}     </div>   ); }
   return (
     <div
       style={{
