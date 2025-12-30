@@ -77,6 +77,25 @@ export default function BoardPage() {
   const size = 8;
   const key = (r, c) => `${r}-${c}`;
   const tileMap = new Map(tiles.map((t) => [key(t.row, t.col), t.tile_state]));
+async function setTileState(row, col, state) {
+  if (!player?.is_gm) return;
+
+  await supabase
+    .from("player_map_tiles")
+    .update({ tile_state: state })
+    .eq("player_id", player.id)
+    .eq("game_id", player.game_id)
+    .eq("row", row)
+    .eq("col", col);
+
+  setTiles((prev) =>
+    prev.map((t) =>
+      t.row === row && t.col === col
+        ? { ...t, tile_state: state }
+        : t
+    )
+  );
+}
 
   return (
     <main style={{ padding: 24, fontFamily: "sans-serif" }}>
@@ -119,11 +138,13 @@ export default function BoardPage() {
 
             return (
               <Cell
-                key={`${row}-${col}`}
-                isMe={isMe}
-                value={value}
-                label={`(${row}, ${col}) state=${state}`}
-              />
+  key={`${row}-${col}`}
+  isMe={isMe}
+  value={value}
+  label={`(${row}, ${col}) state=${state}`}
+  onSet={(newState) => setTileState(row, col, newState)}
+/>
+
             );
           })
         )}
