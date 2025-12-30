@@ -129,3 +129,218 @@ export default function BoardPage() {
 
       // 4) Cargar tiles del mapa personal
       const { data: t, error: tErr } = await supabase
+        .from("player_map_tiles")
+        .select("*")
+        .eq("player_id", p.id)
+        .eq("game_id", p.game_id)
+        .order("row", { ascending: true })
+        .order("col", { ascending: true });
+
+      if (tErr) {
+        if (mounted) {
+          setError(tErr.message);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (mounted) {
+        setTiles(t || []);
+        setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  async function refreshTiles() {
+    if (!player?.game_id) return;
+    const { data: t, error: tErr } = await supabase
+      .from("player_map_tiles")
+      .select("*")
+      .eq("player_id", player.id)
+      .eq("game_id", player.game_id)
+      .order("row", { ascending: true })
+      .order("col", { ascending: true });
+
+    if (tErr) {
+      setError(tErr.message);
+      return;
+    }
+    setTiles(t || []);
+  }
+
+  async function initMyMap() {
+    setError("");
+    setMsg("");
+
+    if (!player?.game_id) {
+      setError(
+        "Tu player aún no tiene game_id. Asigna game_id en la tabla players (para este jugador) y recarga."
+      );
+      return;
+    }
+
+    // inserta 64 casillas unknown (si no existen)
+    const rows = [];
+    for (let r = 1; r <= size; r++) {
+      for (let c = 1; c <= size; c++) {
+        rows.push({
+          game_id: player.game_id,
+          player_id: player.id,
+          row: r,
+          col: c,
+          tile_state: "unknown",
+        });
+      }
+    }
+
+    // upsert para que puedas apretar varias veces sin romper
+    const { error: upErr } = await supabase
+      .from("player_map_tiles")
+      .upsert(rows, { onConflict: "game_id,player_id,row,col" });
+
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+
+    setMsg("Listo tu mapa personal fue inicializado (64 casillas)");
+    await refreshTiles();
+  }
+
+  async function setTileState(row, col, state) {
+    setError("");
+    setMsg("");
+
+    // Por ahora: solo GM edita el mapa (si quieres que todos editen su mapa, borra este if)
+    if (!player?.is_gm) return;
+
+    const { error: uErr } = await supabase
+      .from("player_map_tiles")
+      .update({ tile_state: state })
+      .eq("player_id", player.id)
+      .eq("game_id", player.game_id)
+      .eq("row", row)
+      .eq("col", col);
+
+    if (uErr) {
+      setError(uErr.message);
+      return;
+    }
+
+    setTiles((prev) =>
+      prev.map((t) =>
+        t.row === row && t.col === col ? { ...t, tile_state: state } : t
+      )
+    );
+  }
+
+  return (
+    <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
+      <h1 style={{ marginBottom: 8 }}>
+        {player?.is_gm ? "Setup (GM)" : "Tablero"}
+      </h1>
+
+      {loading && <p>Cargando…</p>}
+
+      {!loading && !player && (
+        <p style={{ color: "crimson" }}>
+          No se pudo cargar tu perfil de jugador.
+        </p>
+      )}
+
+      {!loading && player && !player.game_id && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ color: "#444" }}>
+            Tu jugador no tiene <b>game_id</b> asignado todavía.
+          </p>
+          <p style={{ color: "#444" }}>
+            Solución rápida: en Supabase → tabla <b>players</b> → edita tu fila y
+            pega el <b>id</b> de la partida (tabla <b>games</b>) en <b>game_id</b>.
+            Luego recarga esta página.
+          </p>
+        </div>
+      )}
+
+      {!!error && (
+        <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
+          Error: {error}
+        </p>
+      )}
+
+      {!!msg && (
+        <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
+          {msg}
+        </p>
+      )}
+
+      {!loading && player?.game_id && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ marginBottom: 8, color: "#444" }}>
+            Esto crea tu mapa personal en <b>player_map_tiles</b> con 64 casillas en
+            estado <b>unknown</b>.
+          </p>
+          <button
+            onClick={initMyMap}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid #bbb",
+              cursor: "pointer",
+            }}
+          >
+            Inicializar mi mapa
+          </button>
+
+          <div style={{ marginTop: 18 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${size}, 42px)`,
+                gap: 6,
+                padding: 12,
+                background: "#000",
+                borderRadius: 12,
+                width: "fit-content",
+              }}
+            >
+              {Array.from({ length: size }).map((_, r0) =>
+                Array.from({ length: size }).map((__, c0) => {
+                  const row = r0 + 1;
+                  const col = c0 + 1;
+                  const t = tilesByRC.get(`${row}-${col}`);
+                  const state = t?.tile_state || "unknown";
+                  const value = SYMBOL[state] || "?";
+
+                  // Por ahora solo resaltamos tu posición si existe
+                  const isMe =
+                    player?.row === row &&
+                    player?.col === col &&
+                    player?.alive === true;
+
+                  return (
+                    <Cell
+                      key={`${row}-${col}`}
+                      isMe={isMe}
+                      value={value}
+                      label={`(${row}, ${col}) state=${state}`}
+                      onSet={(newState) => setTileState(row, col, newState)}
+                    />
+                  );
+                })
+              )}
+            </div>
+
+            <p style={{ marginTop: 12, color: "#666" }}>
+              Controles: click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+            </p>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
