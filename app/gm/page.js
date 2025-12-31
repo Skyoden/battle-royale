@@ -49,7 +49,9 @@ export default function GMPage() {
       }
 
       if (!p) {
-        setError("No existe tu perfil en 'players'. Ve a /me para crearlo automáticamente.");
+        setError(
+          "No existe tu perfil en 'players'. Ve a /me para crearlo automáticamente."
+        );
         setLoading(false);
         return;
       }
@@ -85,10 +87,7 @@ export default function GMPage() {
 
     try {
       // ✅ Llamada al RPC (no hacemos insert directo en games)
-      // IMPORTANTE: el nombre del RPC debe existir en tu DB.
-      // Si tu función se llama distinto, cámbialo aquí.
       const { data, error: rpcErr } = await supabase.rpc("create_game", {
-        // Si tu función usa otro nombre de parámetro, cámbialo (ej: game_name)
         p_name: "Partida 1",
       });
 
@@ -97,11 +96,7 @@ export default function GMPage() {
         return;
       }
 
-      // Data puede venir como objeto o array dependiendo de la función
       const out = Array.isArray(data) ? data[0] : data;
-
-      // Esperamos que el RPC devuelva algo como:
-      // { game_id: '...', code: 'ABC12' }
       const code = out?.code;
       const gameId = out?.game_id || out?.id;
 
@@ -114,12 +109,7 @@ export default function GMPage() {
 
       setMsg(`✅ Partida creada.\nCódigo: ${code}\nAhora comparte este código a tus amigos.`);
 
-      // Refrescamos player (para que ya quede con game_id, is_gm, etc)
       await refreshPlayer();
-
-      // Opcional: llevarte automáticamente al setup o board
-      // router.push("/setup");
-      // router.push("/board");
     } finally {
       setCreating(false);
     }
@@ -132,7 +122,9 @@ export default function GMPage() {
       {loading && <p>Cargando…</p>}
 
       {!!error && (
-        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
+        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
+          Error: {error}
+        </p>
       )}
       {!!msg && (
         <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
@@ -156,7 +148,10 @@ export default function GMPage() {
 
           <div style={{ marginTop: 16, color: "#666" }}>
             <p>Luego tus amigos van a /join y ponen el código.</p>
-            <p>Tú como GM vas a /setup para inicializar cosas, y /board para ver tu tablero.</p>
+            <p>
+              Tú como GM vas a /setup para inicializar cosas, y /board para ver tu
+              tablero.
+            </p>
             {!!player?.game_id && (
               <p>
                 Tu game_id actual: <b>{player.game_id}</b>
