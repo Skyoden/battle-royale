@@ -3,33 +3,48 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export default function Nav({ isGm = false }) {
-  const path = usePathname();
+export default function Nav({ isGm }) {
+  const pathname = usePathname();
 
-  const Item = ({ href, label }) => (
-    <Link
-      href={href}
-      style={{
-        padding: "8px 10px",
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        textDecoration: "none",
-        color: path === href ? "#111" : "#444",
-        background: path === href ? "#fff" : "#fafafa",
-        fontWeight: path === href ? 800 : 600,
-      }}
-    >
-      {label}
-    </Link>
-  );
+  const links = [
+    { href: "/board", label: "Tablero" },
+    { href: "/join", label: "Unirse" },
+    { href: "/gm", label: "GM" },
+    ...(isGm ? [{ href: "/setup", label: "Setup" }] : []),
+    { href: "/me", label: "Mi cuenta" },
+  ];
 
   return (
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-      <Item href="/board" label="Tablero" />
-      <Item href="/me" label="Mi cuenta" />
-      {!isGm && <Item href="/join" label="Unirse" />}
-      {isGm && <Item href="/gm" label="GM" />}
-      {isGm && <Item href="/setup" label="Setup" />}
+    <div
+      style={{
+        display: "flex",
+        gap: 10,
+        alignItems: "center",
+        borderBottom: "1px solid #eee",
+        padding: "10px 16px",
+      }}
+    >
+      <div style={{ fontWeight: 900, marginRight: 8 }}>Battle Royale</div>
+
+      {links.map((l) => {
+        const active = pathname === l.href;
+        return (
+          <Link
+            key={l.href}
+            href={l.href}
+            style={{
+              textDecoration: "none",
+              color: "#111",
+              padding: "6px 10px",
+              borderRadius: 10,
+              border: active ? "1px solid #bbb" : "1px solid transparent",
+              background: active ? "#f7f7f7" : "transparent",
+            }}
+          >
+            {l.label}
+          </Link>
+        );
+      })}
     </div>
   );
 }
