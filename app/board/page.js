@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
-import Nav from "../components/Nav";
 
 // Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
@@ -63,7 +62,6 @@ export default function BoardPage() {
 
   const size = 8;
 
-  // Diccionario rápido para lookup de casillas
   const tilesByRC = useMemo(() => {
     const m = new Map();
     for (const t of tiles) m.set(`${t.row}-${t.col}`, t);
@@ -71,7 +69,8 @@ export default function BoardPage() {
   }, [tiles]);
 
   async function loadMyMove() {
-    const { data } = await supabase.rpc("player_get_my_move");
+    const { data, error } = await supabase.rpc("player_get_my_move");
+    if (error) return;
     const out = Array.isArray(data) ? data[0] : data;
     setMyMove(out || null);
   }
@@ -98,7 +97,7 @@ export default function BoardPage() {
     const pl = p || player;
     if (!pl?.game_id) return;
 
-    const { data, error } = await supabase
+    const { data: t, error: tErr } = await supabase
       .from("player_map_tiles")
       .select("*")
       .eq("player_id", pl.id)
@@ -106,22 +105,26 @@ export default function BoardPage() {
       .order("row", { ascending: true })
       .order("col", { ascending: true });
 
-    if (error) {
-      setError(error.message);
+    if (tErr) {
+      setError(tErr.message);
       return;
     }
-
-    setTiles(data || []);
+    setTiles(t || []);
   }
 
   async function ensureMyMapExists(p) {
     if (!p?.game_id) return;
 
-    const { count } = await supabase
+    const { count, error: cErr } = await supabase
       .from("player_map_tiles")
       .select("id", { count: "exact", head: true })
       .eq("player_id", p.id)
       .eq("game_id", p.game_id);
+
+    if (cErr) {
+      setError(cErr.message);
+      return;
+    }
 
     if ((count || 0) > 0) return;
 
@@ -138,7 +141,13 @@ export default function BoardPage() {
       }
     }
 
-    await supabase.from("player_map_tiles").insert(rows);
+    const { error: insErr } = await supabase.from("player_map_tiles").insert(rows);
+    if (insErr) {
+      setError(insErr.message);
+      return;
+    }
+
+    setMsg("Mapa personal creado.");
   }
 
   useEffect(() => {
@@ -151,25 +160,36 @@ export default function BoardPage() {
 
       const { data: s } = await supabase.auth.getSession();
       if (!s?.session) {
-        router.replace("/login");
+        if (mounted) router.replace("/login");
         return;
       }
 
-      const { data: u } = await supabase.auth.getUser();
-      if (!u?.user) {
-        router.replace("/login");
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        if (mounted) router.replace("/login");
         return;
       }
 
-      const { data: p } = await supabase
+      const { data: p, error: pErr } = await supabase
         .from("players")
         .select("*")
-        .eq("user_id", u.user.id)
+        .eq("user_id", user.id)
         .maybeSingle();
 
+      if (pErr) {
+        if (mounted) {
+          setError(pErr.message);
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!p) {
-        setError("No existe tu perfil de jugador.");
-        setLoading(false);
+        if (mounted) {
+          setError("No existe tu perfil en players. Ve a /me para crearlo.");
+          setLoading(false);
+        }
         return;
       }
 
@@ -202,14 +222,14 @@ export default function BoardPage() {
 
     if (!player?.game_id) return;
 
-    // Jugador normal → solicita movimiento
-    if (!player.is_gm) {
+    // Jugador: click = solicitar movimiento
+    if (!player?.is_gm) {
       await requestMove(row, col);
       return;
     }
 
-    // GM → edita su mapa
-    const { error } = await supabase
+    // GM: edita su mapa personal
+    const { error: uErr } = await supabase
       .from("player_map_tiles")
       .update({ tile_state: state })
       .eq("player_id", player.id)
@@ -217,8 +237,8 @@ export default function BoardPage() {
       .eq("row", row)
       .eq("col", col);
 
-    if (error) {
-      setError(error.message);
+    if (uErr) {
+      setError(uErr.message);
       return;
     }
 
@@ -231,34 +251,39 @@ export default function BoardPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>
-        {player?.is_gm ? "GM" : "Tablero"}
-      </h1>
-
-      <Nav isGm={!!player?.is_gm} />
+      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
 
       {loading && <p>Cargando…</p>}
 
       {!!error && (
-        <p style={{ color: "crimson", marginTop: 12 }}>{error}</p>
+        <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
+          Error: {error}
+        </p>
       )}
 
       {!!msg && (
-        <p style={{ color: "#1b4332", marginTop: 12 }}>{msg}</p>
+        <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
+          {msg}
+        </p>
       )}
 
       {!loading && player && !player.game_id && (
-        <p style={{ color: "#444" }}>
-          Aún no estás unido a una partida.
-        </p>
+        <div style={{ marginTop: 12 }}>
+          <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
+        </div>
       )}
 
       {!loading && player?.game_id && (
         <div style={{ marginTop: 18 }}>
-          {!player.is_gm && (
+          {!player?.is_gm && (
             <div style={{ marginBottom: 12, color: "#444" }}>
-              <b>Solicitud pendiente:</b>{" "}
-              {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+              <p style={{ marginBottom: 6 }}>
+                <b>Solicitud pendiente:</b>{" "}
+                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+              </p>
+              <p style={{ marginTop: 0, color: "#666" }}>
+                Para pedir movimiento: haz click en una casilla.
+              </p>
             </div>
           )}
 
@@ -282,22 +307,28 @@ export default function BoardPage() {
                 const value = SYMBOL[state] || "?";
 
                 const isMe =
-                  player.row === row &&
-                  player.col === col &&
-                  player.alive;
+                  player?.row === row &&
+                  player?.col === col &&
+                  player?.alive === true;
 
                 return (
                   <Cell
                     key={`${row}-${col}`}
                     isMe={isMe}
                     value={value}
-                    label={`(${row}, ${col})`}
+                    label={`(${row}, ${col}) state=${state}`}
                     onSet={(newState) => setTileState(row, col, newState)}
                   />
                 );
               })
             )}
           </div>
+
+          <p style={{ marginTop: 12, color: "#666" }}>
+            Jugador: click = solicitar movimiento.
+            <br />
+            GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+          </p>
         </div>
       )}
     </main>
