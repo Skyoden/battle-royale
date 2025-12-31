@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
+import Nav from "../components/Nav";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -118,8 +119,10 @@ export default function SetupPage() {
   }
 
   return (
-    <main>
+    <main style={{ padding: 24, fontFamily: "system-ui" }}>
       <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
+
+      <Nav isGm />
 
       {loading && <p>Cargando…</p>}
 
@@ -180,9 +183,7 @@ export default function SetupPage() {
                     background: "#fff",
                   }}
                 >
-                  <div style={{ fontWeight: 800 }}>
-                    {r.player_name || "Player"}
-                  </div>
+                  <div style={{ fontWeight: 800 }}>{r.player_name || "Player"}</div>
                   <div style={{ color: "#666", marginTop: 6 }}>
                     ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},{r.to_col})
                   </div>
