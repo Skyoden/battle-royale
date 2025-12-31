@@ -21,10 +21,17 @@ export default function LoginPage() {
 
     if (error) {
       setMessage(error.message);
-    } else {
-      // ✅ redirección automática
-      router.replace("/board");
+      return;
     }
+
+    // ✅ Asegura que exista fila en players
+    const { error: ensureErr } = await supabase.rpc("ensure_player");
+    if (ensureErr) {
+      setMessage(ensureErr.message);
+      return;
+    }
+
+    router.replace("/board");
   }
 
   async function handleSignup() {
@@ -37,11 +44,14 @@ export default function LoginPage() {
 
     if (error) {
       setMessage(error.message);
-    } else {
-      // Puede que no haya sesión inmediata si Supabase exige confirmación por email
-      // Igual lo mandamos al board; si no hay sesión, "/" lo devolverá a /login
-      router.replace("/board");
+      return;
     }
+
+    // ⚠️ Puede que no haya sesión inmediata si hay confirmación por email
+    // Igual intentamos asegurar el player (si no hay sesión, no pasa nada grave)
+    await supabase.rpc("ensure_player");
+
+    router.replace("/board");
   }
 
   return (
