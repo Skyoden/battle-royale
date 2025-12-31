@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
-
 
 // Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
@@ -10,6 +10,7 @@ const SYMBOL = {
   empty: "X",
   corpse: "†",
   blocked: "⛔",
+  loot: "★",
 };
 
 function Cell({ isMe, value, label, onSet }) {
@@ -45,12 +46,13 @@ function Cell({ isMe, value, label, onSet }) {
       title={label}
     >
       {isMe ? "ME" : value}
-
     </div>
   );
 }
 
 export default function BoardPage() {
+  const router = useRouter();
+
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +68,66 @@ export default function BoardPage() {
     return m;
   }, [tiles]);
 
+  async function refreshTiles(p) {
+    const pl = p || player;
+    if (!pl?.game_id) return;
+
+    const { data: t, error: tErr } = await supabase
+      .from("player_map_tiles")
+      .select("*")
+      .eq("player_id", pl.id)
+      .eq("game_id", pl.game_id)
+      .order("row", { ascending: true })
+      .order("col", { ascending: true });
+
+    if (tErr) {
+      setError(tErr.message);
+      return;
+    }
+    setTiles(t || []);
+  }
+
+  async function ensureMyMapExists(p) {
+    // Crea las 64 casillas SOLO si aún no existen
+    if (!p?.game_id) return;
+
+    const { count, error: cErr } = await supabase
+      .from("player_map_tiles")
+      .select("id", { count: "exact", head: true })
+      .eq("player_id", p.id)
+      .eq("game_id", p.game_id);
+
+    if (cErr) {
+      setError(cErr.message);
+      return;
+    }
+
+    // Si ya hay tiles (ej: 64) no hacemos nada
+    if ((count || 0) > 0) return;
+
+    const rows = [];
+    for (let r = 1; r <= size; r++) {
+      for (let c = 1; c <= size; c++) {
+        rows.push({
+          game_id: p.game_id,
+          player_id: p.id,
+          row: r,
+          col: c,
+          tile_state: "unknown",
+        });
+      }
+    }
+
+    // Insert normal (solo ocurre una vez)
+    const { error: insErr } = await supabase.from("player_map_tiles").insert(rows);
+    if (insErr) {
+      setError(insErr.message);
+      return;
+    }
+
+    setMsg("Mapa personal creado automáticamente.");
+  }
+
   useEffect(() => {
     let mounted = true;
 
@@ -74,7 +136,15 @@ export default function BoardPage() {
       setError("");
       setMsg("");
 
-      // 1) Usuario autenticado
+      // 1) Si no hay sesión, a /login
+      const { data: s } = await supabase.auth.getSession();
+      const hasSession = !!s?.session;
+      if (!hasSession) {
+        if (mounted) router.replace("/login");
+        return;
+      }
+
+      // 2) Obtener user
       const { data: authData, error: authErr } = await supabase.auth.getUser();
       if (authErr) {
         if (mounted) {
@@ -86,14 +156,11 @@ export default function BoardPage() {
 
       const user = authData?.user;
       if (!user) {
-        if (mounted) {
-          setError("No estás logueado");
-          setLoading(false);
-        }
+        if (mounted) router.replace("/login");
         return;
       }
 
-      // 2) Player row (debe existir ya en tu app)
+      // 3) Player row
       const { data: p, error: pErr } = await supabase
         .from("players")
         .select("*")
@@ -111,115 +178,43 @@ export default function BoardPage() {
       if (!p) {
         if (mounted) {
           setError(
-            "No existe registro en 'players' para este usuario. (Tu /me suele crearlo automáticamente.)"
+            "No existe registro en 'players' para este usuario. (Debería crearse automáticamente al registrarte.)"
           );
           setLoading(false);
         }
         return;
       }
 
-      if (mounted) setPlayer(p);
+      if (!mounted) return;
+      setPlayer(p);
 
-      // 3) Si aún no hay game_id, mostramos mensaje
+      // 4) Si aún no estás en una partida, lo mostramos claramente (sin “anda a Supabase”)
       if (!p.game_id) {
-        if (mounted) {
-          setTiles([]);
-          setLoading(false);
-        }
-        return;
-      }
-
-      // 4) Cargar tiles del mapa personal
-      const { data: t, error: tErr } = await supabase
-        .from("player_map_tiles")
-        .select("*")
-        .eq("player_id", p.id)
-        .eq("game_id", p.game_id)
-        .order("row", { ascending: true })
-        .order("col", { ascending: true });
-
-      if (tErr) {
-        if (mounted) {
-          setError(tErr.message);
-          setLoading(false);
-        }
-        return;
-      }
-
-      if (mounted) {
-        setTiles(t || []);
+        setTiles([]);
         setLoading(false);
+        return;
       }
+
+      // 5) A: autocrear mapa si no existe
+      await ensureMyMapExists(p);
+
+      // 6) cargar tiles
+      await refreshTiles(p);
+
+      if (mounted) setLoading(false);
     }
 
     load();
     return () => {
       mounted = false;
     };
-  }, []);
-
-  async function refreshTiles() {
-    if (!player?.game_id) return;
-    const { data: t, error: tErr } = await supabase
-      .from("player_map_tiles")
-      .select("*")
-      .eq("player_id", player.id)
-      .eq("game_id", player.game_id)
-      .order("row", { ascending: true })
-      .order("col", { ascending: true });
-
-    if (tErr) {
-      setError(tErr.message);
-      return;
-    }
-    setTiles(t || []);
-  }
-
-  async function initMyMap() {
-    setError("");
-    setMsg("");
-
-    if (!player?.game_id) {
-      setError(
-        "Tu player aún no tiene game_id. Asigna game_id en la tabla players (para este jugador) y recarga."
-      );
-      return;
-    }
-
-    // inserta 64 casillas unknown (si no existen)
-    const rows = [];
-    for (let r = 1; r <= size; r++) {
-      for (let c = 1; c <= size; c++) {
-        rows.push({
-          game_id: player.game_id,
-          player_id: player.id,
-          row: r,
-          col: c,
-          tile_state: "unknown",
-        });
-      }
-    }
-
-    // upsert para que puedas apretar varias veces sin romper
-    const { error: upErr } = await supabase
-      .from("player_map_tiles")
-      .upsert(rows, { onConflict: "game_id,player_id,row,col" });
-
-    if (upErr) {
-      setError(upErr.message);
-      return;
-    }
-
-    setMsg("Listo tu mapa personal fue inicializado (64 casillas)");
-    await refreshTiles();
-  }
+  }, [router]);
 
   async function setTileState(row, col, state) {
     setError("");
     setMsg("");
 
-    // Por ahora: solo GM edita el mapa (si quieres que todos editen su mapa, borra este if)
-    if (!player?.is_gm) return;
+    if (!player?.game_id) return;
 
     const { error: uErr } = await supabase
       .from("player_map_tiles")
@@ -243,30 +238,9 @@ export default function BoardPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>
-        {player?.is_gm ? "Setup (GM)" : "Tablero"}
-      </h1>
+      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
 
       {loading && <p>Cargando…</p>}
-
-      {!loading && !player && (
-        <p style={{ color: "crimson" }}>
-          No se pudo cargar tu perfil de jugador.
-        </p>
-      )}
-
-      {!loading && player && !player.game_id && (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#444" }}>
-            Tu jugador no tiene <b>game_id</b> asignado todavía.
-          </p>
-          <p style={{ color: "#444" }}>
-            Solución rápida: en Supabase → tabla <b>players</b> → edita tu fila y
-            pega el <b>id</b> de la partida (tabla <b>games</b>) en <b>game_id</b>.
-            Luego recarga esta página.
-          </p>
-        </div>
-      )}
 
       {!!error && (
         <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
@@ -280,67 +254,60 @@ export default function BoardPage() {
         </p>
       )}
 
-      {!loading && player?.game_id && (
+      {!loading && player && !player.game_id && (
         <div style={{ marginTop: 12 }}>
-          <p style={{ marginBottom: 8, color: "#444" }}>
-            Esto crea tu mapa personal en <b>player_map_tiles</b> con 64 casillas en
-            estado <b>unknown</b>.
+          <p style={{ color: "#444" }}>
+            Aún no estás unido a una partida.
           </p>
-          <button
-            onClick={initMyMap}
+          <p style={{ color: "#666" }}>
+            Próximo paso: te voy a dejar una pantalla “Unirse a partida” con un código
+            para que esto sea 100% automático (sin Supabase).
+          </p>
+        </div>
+      )}
+
+      {!loading && player?.game_id && (
+        <div style={{ marginTop: 18 }}>
+          <div
             style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #bbb",
-              cursor: "pointer",
+              display: "grid",
+              gridTemplateColumns: `repeat(${size}, 42px)`,
+              gap: 6,
+              padding: 12,
+              background: "#000",
+              borderRadius: 12,
+              width: "fit-content",
             }}
           >
-            Inicializar mi mapa
-          </button>
+            {Array.from({ length: size }).map((_, r0) =>
+              Array.from({ length: size }).map((__, c0) => {
+                const row = r0 + 1;
+                const col = c0 + 1;
+                const t = tilesByRC.get(`${row}-${col}`);
+                const state = t?.tile_state || "unknown";
+                const value = SYMBOL[state] || "?";
 
-          <div style={{ marginTop: 18 }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${size}, 42px)`,
-                gap: 6,
-                padding: 12,
-                background: "#000",
-                borderRadius: 12,
-                width: "fit-content",
-              }}
-            >
-              {Array.from({ length: size }).map((_, r0) =>
-                Array.from({ length: size }).map((__, c0) => {
-                  const row = r0 + 1;
-                  const col = c0 + 1;
-                  const t = tilesByRC.get(`${row}-${col}`);
-                  const state = t?.tile_state || "unknown";
-                  const value = SYMBOL[state] || "?";
+                const isMe =
+                  player?.row === row &&
+                  player?.col === col &&
+                  player?.alive === true;
 
-                  // Por ahora solo resaltamos tu posición si existe
-                  const isMe =
-                    player?.row === row &&
-                    player?.col === col &&
-                    player?.alive === true;
-
-                  return (
-                    <Cell
-                      key={`${row}-${col}`}
-                      isMe={isMe}
-                      value={value}
-                      label={`(${row}, ${col}) state=${state}`}
-                      onSet={(newState) => setTileState(row, col, newState)}
-                    />
-                  );
-                })
-              )}
-            </div>
-
-            <p style={{ marginTop: 12, color: "#666" }}>
-              Controles: click = X, click derecho = †, Shift+click = ⛔, doble click = ?
-            </p>
+                return (
+                  <Cell
+                    key={`${row}-${col}`}
+                    isMe={isMe}
+                    value={value}
+                    label={`(${row}, ${col}) state=${state}`}
+                    onSet={(newState) => setTileState(row, col, newState)}
+                  />
+                );
+              })
+            )}
           </div>
+
+          <p style={{ marginTop: 12, color: "#666" }}>
+            Controles: click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+          </p>
         </div>
       )}
     </main>
