@@ -1,14 +1,18 @@
 import "./globals.css";
+import Nav from "./components/Nav";
 
 export const metadata = {
   title: "Battle Royale",
-  description: "Game",
+  description: "Battle Royale",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body style={{ margin: 0 }}>{children}</body>
+      <body>
+        <Nav />
+        <div style={{ padding: 24 }}>{children}</div>
+      </body>
     </html>
   );
 }
