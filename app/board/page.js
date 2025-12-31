@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
+import Nav from "../components/Nav";
 
 // Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
@@ -55,7 +56,7 @@ export default function BoardPage() {
 
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
-  const [myMove, setMyMove] = useState(null); // ✅ solicitud pendiente del jugador
+  const [myMove, setMyMove] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -70,8 +71,7 @@ export default function BoardPage() {
   }, [tiles]);
 
   async function loadMyMove() {
-    const { data, error } = await supabase.rpc("player_get_my_move");
-    if (error) return; // si falla no bloqueamos el tablero
+    const { data } = await supabase.rpc("player_get_my_move");
     const out = Array.isArray(data) ? data[0] : data;
     setMyMove(out || null);
   }
@@ -90,7 +90,7 @@ export default function BoardPage() {
       return;
     }
 
-    setMsg(`✅ Movimiento solicitado a (${toRow}, ${toCol}). El GM debe aprobarlo.`);
+    setMsg(`✅ Movimiento solicitado a (${toRow}, ${toCol}).`);
     await loadMyMove();
   }
 
@@ -98,7 +98,7 @@ export default function BoardPage() {
     const pl = p || player;
     if (!pl?.game_id) return;
 
-    const { data: t, error: tErr } = await supabase
+    const { data, error } = await supabase
       .from("player_map_tiles")
       .select("*")
       .eq("player_id", pl.id)
@@ -106,29 +106,23 @@ export default function BoardPage() {
       .order("row", { ascending: true })
       .order("col", { ascending: true });
 
-    if (tErr) {
-      setError(tErr.message);
+    if (error) {
+      setError(error.message);
       return;
     }
-    setTiles(t || []);
+
+    setTiles(data || []);
   }
 
   async function ensureMyMapExists(p) {
-    // Crea las 64 casillas SOLO si aún no existen
     if (!p?.game_id) return;
 
-    const { count, error: cErr } = await supabase
+    const { count } = await supabase
       .from("player_map_tiles")
       .select("id", { count: "exact", head: true })
       .eq("player_id", p.id)
       .eq("game_id", p.game_id);
 
-    if (cErr) {
-      setError(cErr.message);
-      return;
-    }
-
-    // Si ya hay tiles (ej: 64) no hacemos nada
     if ((count || 0) > 0) return;
 
     const rows = [];
@@ -144,14 +138,7 @@ export default function BoardPage() {
       }
     }
 
-    // Insert normal (solo ocurre una vez)
-    const { error: insErr } = await supabase.from("player_map_tiles").insert(rows);
-    if (insErr) {
-      setError(insErr.message);
-      return;
-    }
-
-    setMsg("Mapa personal creado automáticamente.");
+    await supabase.from("player_map_tiles").insert(rows);
   }
 
   useEffect(() => {
@@ -162,72 +149,42 @@ export default function BoardPage() {
       setError("");
       setMsg("");
 
-      // 1) Si no hay sesión, a /login
       const { data: s } = await supabase.auth.getSession();
-      const hasSession = !!s?.session;
-      if (!hasSession) {
-        if (mounted) router.replace("/login");
+      if (!s?.session) {
+        router.replace("/login");
         return;
       }
 
-      // 2) Obtener user
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr) {
-        if (mounted) {
-          setError(authErr.message || "Error al obtener usuario");
-          setLoading(false);
-        }
+      const { data: u } = await supabase.auth.getUser();
+      if (!u?.user) {
+        router.replace("/login");
         return;
       }
 
-      const user = authData?.user;
-      if (!user) {
-        if (mounted) router.replace("/login");
-        return;
-      }
-
-      // 3) Player row
-      const { data: p, error: pErr } = await supabase
+      const { data: p } = await supabase
         .from("players")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", u.user.id)
         .maybeSingle();
 
-      if (pErr) {
-        if (mounted) {
-          setError(pErr.message);
-          setLoading(false);
-        }
-        return;
-      }
-
       if (!p) {
-        if (mounted) {
-          setError(
-            "No existe registro en 'players' para este usuario. (Debería crearse automáticamente al registrarte.)"
-          );
-          setLoading(false);
-        }
+        setError("No existe tu perfil de jugador.");
+        setLoading(false);
         return;
       }
 
       if (!mounted) return;
       setPlayer(p);
 
-      // ✅ cargar solicitud pendiente (si existe)
       await loadMyMove();
 
-      // 4) Si aún no estás en una partida, lo mostramos claramente (sin “anda a Supabase”)
       if (!p.game_id) {
         setTiles([]);
         setLoading(false);
         return;
       }
 
-      // 5) A: autocrear mapa si no existe
       await ensureMyMapExists(p);
-
-      // 6) cargar tiles
       await refreshTiles(p);
 
       if (mounted) setLoading(false);
@@ -245,14 +202,14 @@ export default function BoardPage() {
 
     if (!player?.game_id) return;
 
-    // ✅ Jugador: pedir movimiento (no revela info, solo manda coordenadas)
-    if (!player?.is_gm) {
+    // Jugador normal → solicita movimiento
+    if (!player.is_gm) {
       await requestMove(row, col);
       return;
     }
 
-    // ✅ GM: puede marcar su propio mapa personal (como antes)
-    const { error: uErr } = await supabase
+    // GM → edita su mapa
+    const { error } = await supabase
       .from("player_map_tiles")
       .update({ tile_state: state })
       .eq("player_id", player.id)
@@ -260,8 +217,8 @@ export default function BoardPage() {
       .eq("row", row)
       .eq("col", col);
 
-    if (uErr) {
-      setError(uErr.message);
+    if (error) {
+      setError(error.message);
       return;
     }
 
@@ -274,44 +231,34 @@ export default function BoardPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
+      <h1 style={{ marginBottom: 8 }}>
+        {player?.is_gm ? "GM" : "Tablero"}
+      </h1>
+
+      <Nav isGm={!!player?.is_gm} />
 
       {loading && <p>Cargando…</p>}
 
       {!!error && (
-        <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          Error: {error}
-        </p>
+        <p style={{ color: "crimson", marginTop: 12 }}>{error}</p>
       )}
 
       {!!msg && (
-        <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          {msg}
-        </p>
+        <p style={{ color: "#1b4332", marginTop: 12 }}>{msg}</p>
       )}
 
       {!loading && player && !player.game_id && (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
-          <p style={{ color: "#666" }}>
-            Próximo paso: te voy a dejar una pantalla “Unirse a partida” con un
-            código para que esto sea 100% automático (sin Supabase).
-          </p>
-        </div>
+        <p style={{ color: "#444" }}>
+          Aún no estás unido a una partida.
+        </p>
       )}
 
       {!loading && player?.game_id && (
         <div style={{ marginTop: 18 }}>
-          {!player?.is_gm && (
+          {!player.is_gm && (
             <div style={{ marginBottom: 12, color: "#444" }}>
-              <p style={{ marginBottom: 6 }}>
-                <b>Tu solicitud pendiente:</b>{" "}
-                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
-              </p>
-              <p style={{ marginTop: 0, color: "#666" }}>
-                Para pedir movimiento: haz click en una casilla del tablero.
-                (Tu movimiento quedará pendiente hasta la resolución de la noche.)
-              </p>
+              <b>Solicitud pendiente:</b>{" "}
+              {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
             </div>
           )}
 
@@ -335,29 +282,22 @@ export default function BoardPage() {
                 const value = SYMBOL[state] || "?";
 
                 const isMe =
-                  player?.row === row &&
-                  player?.col === col &&
-                  player?.alive === true;
+                  player.row === row &&
+                  player.col === col &&
+                  player.alive;
 
                 return (
                   <Cell
                     key={`${row}-${col}`}
                     isMe={isMe}
                     value={value}
-                    label={`(${row}, ${col}) state=${state}`}
+                    label={`(${row}, ${col})`}
                     onSet={(newState) => setTileState(row, col, newState)}
                   />
                 );
               })
             )}
           </div>
-
-          <p style={{ marginTop: 12, color: "#666" }}>
-            Controles (GM mapa personal): click = X, click derecho = †,
-            Shift+click = ⛔, doble click = ?
-            <br />
-            Controles (Jugador): click en casilla = solicitar movimiento.
-          </p>
         </div>
       )}
     </main>
