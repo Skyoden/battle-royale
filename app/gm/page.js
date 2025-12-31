@@ -20,7 +20,6 @@ export default function GMPage() {
       setError("");
       setMsg("");
 
-      // 1) Debe estar logueado
       const { data: s } = await supabase.auth.getSession();
       if (!s?.session) {
         router.replace("/login");
@@ -33,7 +32,6 @@ export default function GMPage() {
         return;
       }
 
-      // 2) Cargar tu fila de players
       const { data: p, error: pErr } = await supabase
         .from("players")
         .select("*")
@@ -49,9 +47,7 @@ export default function GMPage() {
       }
 
       if (!p) {
-        setError(
-          "No existe tu perfil en 'players'. Ve a /me para crearlo automáticamente."
-        );
+        setError("No existe tu perfil en 'players'. Ve a /me para crearlo.");
         setLoading(false);
         return;
       }
@@ -86,7 +82,6 @@ export default function GMPage() {
     setCreating(true);
 
     try {
-      // ✅ Llamada al RPC (no hacemos insert directo en games)
       const { data, error: rpcErr } = await supabase.rpc("create_game", {
         p_name: "Partida 1",
       });
@@ -101,14 +96,11 @@ export default function GMPage() {
       const gameId = out?.game_id || out?.id;
 
       if (!code || !gameId) {
-        setError(
-          "El RPC se ejecutó pero no devolvió { game_id, code }. Revisa el RETURN del RPC."
-        );
+        setError("El RPC no devolvió { game_id, code }.");
         return;
       }
 
-      setMsg(`✅ Partida creada.\nCódigo: ${code}\nAhora comparte este código a tus amigos.`);
-
+      setMsg(`✅ Partida creada.\nCódigo: ${code}\nComparte este código a tus amigos.`);
       await refreshPlayer();
     } finally {
       setCreating(false);
@@ -122,15 +114,30 @@ export default function GMPage() {
       {loading && <p>Cargando…</p>}
 
       {!!error && (
-        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
-          Error: {error}
-        </p>
+        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
       )}
       {!!msg && (
         <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
       )}
 
-      {!loading && player && (
+      {!loading && player && !player.is_gm && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ color: "crimson" }}>No tienes permisos de GM en esta cuenta.</p>
+          <button
+            onClick={() => router.push("/join")}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid #bbb",
+              cursor: "pointer",
+            }}
+          >
+            Ir a Unirse a partida
+          </button>
+        </div>
+      )}
+
+      {!loading && player && player.is_gm && (
         <div style={{ marginTop: 12 }}>
           <button
             onClick={createGame}
@@ -148,10 +155,7 @@ export default function GMPage() {
 
           <div style={{ marginTop: 16, color: "#666" }}>
             <p>Luego tus amigos van a /join y ponen el código.</p>
-            <p>
-              Tú como GM vas a /setup para inicializar cosas, y /board para ver tu
-              tablero.
-            </p>
+            <p>Tú como GM vas a /setup y /board.</p>
             {!!player?.game_id && (
               <p>
                 Tu game_id actual: <b>{player.game_id}</b>
