@@ -1,73 +1,225 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabase";
 
 export default function SetupPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [me, setMe] = useState(null);
+  const [requests, setRequests] = useState([]);
   const [msg, setMsg] = useState("");
-  const [player, setPlayer] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    async function run() {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
-        setMsg("No estás logueado. Ve a /login");
+    let mounted = true;
+
+    async function boot() {
+      setLoading(true);
+      setError("");
+      setMsg("");
+
+      const { data: s } = await supabase.auth.getSession();
+      if (!s?.session) {
+        router.replace("/login");
         return;
       }
 
-      const { data: p, error } = await supabase
+      const { data: u } = await supabase.auth.getUser();
+      if (!u?.user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: p } = await supabase
         .from("players")
-        .select("id, game_id, is_gm")
+        .select("*")
+        .eq("user_id", u.user.id)
         .maybeSingle();
 
-      if (error) return setMsg(error.message);
-      if (!p) return setMsg("No hay player. Ve a /me");
-      if (!p.game_id) return setMsg("Tu player no tiene game_id (asócialo a una partida).");
-      if (!p.is_gm) return setMsg("Solo GM puede usar /setup por ahora.");
+      if (!mounted) return;
 
-      setPlayer(p);
-      setMsg("");
-    }
-    run();
-  }, []);
-
-  async function initMyMap() {
-    if (!player) return;
-
-    setMsg("Creando 64 casillas en tu mapa personal...");
-
-    const rows = [];
-    for (let r = 1; r <= 8; r++) {
-      for (let c = 1; c <= 8; c++) {
-        rows.push({
-          player_id: player.id,
-          game_id: player.game_id,
-          row: r,
-          col: c,
-          tile_state: "unknown", // unknown | empty | corpse | blocked
-        });
+      if (!p) {
+        setError("No existe tu perfil en players.");
+        setLoading(false);
+        return;
       }
+
+      if (!p.is_gm) {
+        setError("No tienes permisos de GM.");
+        setLoading(false);
+        return;
+      }
+
+      if (!p.game_id) {
+        setError("Aún no tienes una partida. Crea una en /gm.");
+        setLoading(false);
+        return;
+      }
+
+      setMe(p);
+      setLoading(false);
+      await refresh();
     }
 
-    const { error } = await supabase.from("player_map_tiles").insert(rows);
+    boot();
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
-    if (error) setMsg("Error: " + error.message);
-    else setMsg("Listo ✅ Tu mapa personal fue inicializado (64 casillas).");
+  async function refresh() {
+    setError("");
+    const { data, error: e } = await supabase.rpc("gm_list_move_requests");
+    if (e) {
+      setError(e.message);
+      return;
+    }
+    setRequests(data || []);
+  }
+
+  async function resolve(requestId, action) {
+    setError("");
+    setMsg("");
+    setBusy(true);
+    try {
+      const { error: e } = await supabase.rpc("gm_resolve_move_request", {
+        p_request_id: requestId,
+        p_action: action, // 'approved' | 'rejected'
+      });
+      if (e) {
+        setError(e.message);
+        return;
+      }
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyAll() {
+    setError("");
+    setMsg("");
+    setBusy(true);
+    try {
+      const { data, error: e } = await supabase.rpc("gm_apply_approved_moves");
+      if (e) {
+        setError(e.message);
+        return;
+      }
+      setMsg(`✅ Movimientos aplicados: ${data ?? 0}`);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <h1>Setup (GM)</h1>
-      {msg && <p>{msg}</p>}
+    <main>
+      <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
 
-      {player && (
-        <>
-          <p>
-            Esto crea tu mapa personal en <code>player_map_tiles</code> con 64 casillas
-            en estado <b>unknown</b>.
-          </p>
-          <button onClick={initMyMap}>Inicializar mi mapa</button>
-        </>
+      {loading && <p>Cargando…</p>}
+
+      {!!error && (
+        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
+      )}
+      {!!msg && (
+        <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
+      )}
+
+      {!loading && me && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              onClick={refresh}
+              disabled={busy}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #bbb",
+                cursor: busy ? "not-allowed" : "pointer",
+                background: "#fff",
+              }}
+            >
+              Refrescar solicitudes
+            </button>
+
+            <button
+              onClick={applyAll}
+              disabled={busy}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #bbb",
+                cursor: busy ? "not-allowed" : "pointer",
+                background: "#fff",
+              }}
+            >
+              Aplicar movimientos aprobados
+            </button>
+          </div>
+
+          <h2 style={{ marginTop: 18, fontSize: 16 }}>
+            Solicitudes de movimiento (pendientes): {requests.length}
+          </h2>
+
+          {requests.length === 0 ? (
+            <p style={{ color: "#666" }}>No hay solicitudes pendientes.</p>
+          ) : (
+            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              {requests.map((r) => (
+                <div
+                  key={r.request_id}
+                  style={{
+                    border: "1px solid #e5e5e5",
+                    borderRadius: 12,
+                    padding: 12,
+                    background: "#fff",
+                  }}
+                >
+                  <div style={{ fontWeight: 800 }}>
+                    {r.player_name || "Player"}
+                  </div>
+                  <div style={{ color: "#666", marginTop: 6 }}>
+                    ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},{r.to_col})
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                    <button
+                      onClick={() => resolve(r.request_id, "approved")}
+                      disabled={busy}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #bbb",
+                        cursor: busy ? "not-allowed" : "pointer",
+                        background: "#fff",
+                      }}
+                    >
+                      Aprobar
+                    </button>
+                    <button
+                      onClick={() => resolve(r.request_id, "rejected")}
+                      disabled={busy}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #bbb",
+                        cursor: busy ? "not-allowed" : "pointer",
+                        background: "#fff",
+                      }}
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </main>
   );
