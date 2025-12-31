@@ -1,5 +1,6 @@
 "use client";
 
+import Nav from "../components/Nav";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -33,13 +34,19 @@ export default function SetupPage() {
         return;
       }
 
-      const { data: p } = await supabase
+      const { data: p, error: pErr } = await supabase
         .from("players")
         .select("*")
         .eq("user_id", u.user.id)
         .maybeSingle();
 
       if (!mounted) return;
+
+      if (pErr) {
+        setError(pErr.message);
+        setLoading(false);
+        return;
+      }
 
       if (!p) {
         setError("No existe tu perfil en players.");
@@ -68,7 +75,6 @@ export default function SetupPage() {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   async function refresh() {
@@ -118,109 +124,119 @@ export default function SetupPage() {
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui" }}>
-      <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
+    <>
+      <Nav isGm={!!me?.is_gm} />
 
-      {loading && <p>Cargando…</p>}
+      <main style={{ padding: 24, fontFamily: "system-ui" }}>
+        <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
 
-      {!!error && (
-        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
-      )}
-      {!!msg && (
-        <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
-      )}
+        {loading && <p>Cargando…</p>}
 
-      {!loading && me && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              onClick={refresh}
-              disabled={busy}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #bbb",
-                cursor: busy ? "not-allowed" : "pointer",
-                background: "#fff",
-              }}
-            >
-              Refrescar solicitudes
-            </button>
+        {!!error && (
+          <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
+            Error: {error}
+          </p>
+        )}
 
-            <button
-              onClick={applyAll}
-              disabled={busy}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #bbb",
-                cursor: busy ? "not-allowed" : "pointer",
-                background: "#fff",
-              }}
-            >
-              Aplicar movimientos aprobados
-            </button>
-          </div>
+        {!!msg && (
+          <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
+        )}
 
-          <h2 style={{ marginTop: 18, fontSize: 16 }}>
-            Solicitudes pendientes: {requests.length}
-          </h2>
+        {!loading && me && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={refresh}
+                disabled={busy}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #bbb",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  background: "#fff",
+                }}
+              >
+                Refrescar solicitudes
+              </button>
 
-          {requests.length === 0 ? (
-            <p style={{ color: "#666" }}>No hay solicitudes pendientes.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {requests.map((r) => (
-                <div
-                  key={r.request_id}
-                  style={{
-                    border: "1px solid #e5e5e5",
-                    borderRadius: 12,
-                    padding: 12,
-                    background: "#fff",
-                  }}
-                >
-                  <div style={{ fontWeight: 800 }}>
-                    {r.player_name || "Player"}
-                  </div>
-                  <div style={{ color: "#666", marginTop: 6 }}>
-                    ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},{r.to_col})
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                    <button
-                      onClick={() => resolve(r.request_id, "approved")}
-                      disabled={busy}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #bbb",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        background: "#fff",
-                      }}
-                    >
-                      Aprobar
-                    </button>
-                    <button
-                      onClick={() => resolve(r.request_id, "rejected")}
-                      disabled={busy}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #bbb",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        background: "#fff",
-                      }}
-                    >
-                      Rechazar
-                    </button>
-                  </div>
-                </div>
-              ))}
+              <button
+                onClick={applyAll}
+                disabled={busy}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #bbb",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  background: "#fff",
+                }}
+              >
+                Aplicar movimientos aprobados
+              </button>
             </div>
-          )}
-        </div>
-      )}
-    </main>
+
+            <h2 style={{ marginTop: 18, fontSize: 16 }}>
+              Solicitudes pendientes: {requests.length}
+            </h2>
+
+            {requests.length === 0 ? (
+              <p style={{ color: "#666" }}>No hay solicitudes pendientes.</p>
+            ) : (
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {requests.map((r) => (
+                  <div
+                    key={r.request_id}
+                    style={{
+                      border: "1px solid #e5e5e5",
+                      borderRadius: 12,
+                      padding: 12,
+                      background: "#fff",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>
+                      {r.player_name || "Player"}
+                    </div>
+
+                    <div style={{ color: "#666", marginTop: 6 }}>
+                      ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},
+                      {r.to_col})
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                      <button
+                        onClick={() => resolve(r.request_id, "approved")}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #bbb",
+                          cursor: busy ? "not-allowed" : "pointer",
+                          background: "#fff",
+                        }}
+                      >
+                        Aprobar
+                      </button>
+
+                      <button
+                        onClick={() => resolve(r.request_id, "rejected")}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #bbb",
+                          cursor: busy ? "not-allowed" : "pointer",
+                          background: "#fff",
+                        }}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </>
   );
 }
