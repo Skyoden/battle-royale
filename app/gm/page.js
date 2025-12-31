@@ -4,19 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
-function makeCode(len = 5) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
 export default function GMPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [player, setPlayer] = useState(null);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -26,29 +20,36 @@ export default function GMPage() {
       setError("");
       setMsg("");
 
+      // 1) Debe estar logueado
       const { data: s } = await supabase.auth.getSession();
       if (!s?.session) {
         router.replace("/login");
         return;
       }
 
-      const { data: u } = await supabase.auth.getUser();
-      const user = u?.user;
-      if (!user) {
+      const { data: u, error: uErr } = await supabase.auth.getUser();
+      if (uErr || !u?.user) {
         router.replace("/login");
         return;
       }
 
-      const { data: p } = await supabase
+      // 2) Cargar tu fila de players
+      const { data: p, error: pErr } = await supabase
         .from("players")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", u.user.id)
         .maybeSingle();
 
       if (!mounted) return;
 
+      if (pErr) {
+        setError(pErr.message);
+        setLoading(false);
+        return;
+      }
+
       if (!p) {
-        setError("No existe tu perfil en players.");
+        setError("No existe tu perfil en 'players'. Ve a /me para crearlo automáticamente.");
         setLoading(false);
         return;
       }
@@ -63,45 +64,65 @@ export default function GMPage() {
     };
   }, [router]);
 
+  async function refreshPlayer() {
+    const { data: u } = await supabase.auth.getUser();
+    const user = u?.user;
+    if (!user) return;
+
+    const { data: p } = await supabase
+      .from("players")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (p) setPlayer(p);
+  }
+
   async function createGame() {
     setError("");
-    setMsg("Creando partida...");
+    setMsg("");
+    setCreating(true);
 
-    // 1) crear game
-    const code = makeCode(5);
+    try {
+      // ✅ Llamada al RPC (no hacemos insert directo en games)
+      // IMPORTANTE: el nombre del RPC debe existir en tu DB.
+      // Si tu función se llama distinto, cámbialo aquí.
+      const { data, error: rpcErr } = await supabase.rpc("create_game", {
+        // Si tu función usa otro nombre de parámetro, cámbialo (ej: game_name)
+        p_name: "Partida 1",
+      });
 
-    const { data: g, error: gErr } = await supabase
-      .from("games")
-      .insert({ code, size: 8, phase: "setup" })
-      .select("*")
-      .single();
+      if (rpcErr) {
+        setError(rpcErr.message);
+        return;
+      }
 
-    if (gErr) {
-      setError(gErr.message);
-      setMsg("");
-      return;
+      // Data puede venir como objeto o array dependiendo de la función
+      const out = Array.isArray(data) ? data[0] : data;
+
+      // Esperamos que el RPC devuelva algo como:
+      // { game_id: '...', code: 'ABC12' }
+      const code = out?.code;
+      const gameId = out?.game_id || out?.id;
+
+      if (!code || !gameId) {
+        setError(
+          "El RPC se ejecutó pero no devolvió { game_id, code }. Revisa el RETURN del RPC."
+        );
+        return;
+      }
+
+      setMsg(`✅ Partida creada.\nCódigo: ${code}\nAhora comparte este código a tus amigos.`);
+
+      // Refrescamos player (para que ya quede con game_id, is_gm, etc)
+      await refreshPlayer();
+
+      // Opcional: llevarte automáticamente al setup o board
+      // router.push("/setup");
+      // router.push("/board");
+    } finally {
+      setCreating(false);
     }
-
-    // 2) asignar este player como GM y unirlo al game
-    const { error: pErr } = await supabase
-      .from("players")
-      .update({
-        game_id: g.id,
-        is_gm: true,
-        alive: true,
-        lives: 2,
-        row: 1,
-        col: 1,
-      })
-      .eq("id", player.id);
-
-    if (pErr) {
-      setError(pErr.message);
-      setMsg("");
-      return;
-    }
-
-    setMsg(`✅ Partida creada.\nCódigo: ${g.code}\nAhora comparte este código a tus amigos.`);
   }
 
   return (
@@ -110,26 +131,37 @@ export default function GMPage() {
 
       {loading && <p>Cargando…</p>}
 
-      {!!error && <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>}
-      {!!msg && <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>}
+      {!!error && (
+        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
+      )}
+      {!!msg && (
+        <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
+      )}
 
       {!loading && player && (
         <div style={{ marginTop: 12 }}>
           <button
             onClick={createGame}
+            disabled={creating}
             style={{
               padding: "10px 14px",
               borderRadius: 10,
               border: "1px solid #bbb",
-              cursor: "pointer",
+              cursor: creating ? "not-allowed" : "pointer",
+              opacity: creating ? 0.7 : 1,
             }}
           >
-            Crear nueva partida (GM)
+            {creating ? "Creando..." : "Crear nueva partida (GM)"}
           </button>
 
           <div style={{ marginTop: 16, color: "#666" }}>
             <p>Luego tus amigos van a /join y ponen el código.</p>
-            <p>Tú como GM vas a /board para ver tu tablero.</p>
+            <p>Tú como GM vas a /setup para inicializar cosas, y /board para ver tu tablero.</p>
+            {!!player?.game_id && (
+              <p>
+                Tu game_id actual: <b>{player.game_id}</b>
+              </p>
+            )}
           </div>
         </div>
       )}
