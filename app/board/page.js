@@ -1,5 +1,6 @@
 "use client";
 
+import Nav from "../components/Nav";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -250,87 +251,92 @@ export default function BoardPage() {
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
+    <>
+      <Nav isGm={!!player?.is_gm} />
 
-      {loading && <p>Cargando…</p>}
+      <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
+        <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
 
-      {!!error && (
-        <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          Error: {error}
-        </p>
-      )}
+        {loading && <p>Cargando…</p>}
 
-      {!!msg && (
-        <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          {msg}
-        </p>
-      )}
-
-      {!loading && player && !player.game_id && (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
-        </div>
-      )}
-
-      {!loading && player?.game_id && (
-        <div style={{ marginTop: 18 }}>
-          {!player?.is_gm && (
-            <div style={{ marginBottom: 12, color: "#444" }}>
-              <p style={{ marginBottom: 6 }}>
-                <b>Solicitud pendiente:</b>{" "}
-                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
-              </p>
-              <p style={{ marginTop: 0, color: "#666" }}>
-                Para pedir movimiento: haz click en una casilla.
-              </p>
-            </div>
-          )}
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${size}, 42px)`,
-              gap: 6,
-              padding: 12,
-              background: "#000",
-              borderRadius: 12,
-              width: "fit-content",
-            }}
-          >
-            {Array.from({ length: size }).map((_, r0) =>
-              Array.from({ length: size }).map((__, c0) => {
-                const row = r0 + 1;
-                const col = c0 + 1;
-                const t = tilesByRC.get(`${row}-${col}`);
-                const state = t?.tile_state || "unknown";
-                const value = SYMBOL[state] || "?";
-
-                const isMe =
-                  player?.row === row &&
-                  player?.col === col &&
-                  player?.alive === true;
-
-                return (
-                  <Cell
-                    key={`${row}-${col}`}
-                    isMe={isMe}
-                    value={value}
-                    label={`(${row}, ${col}) state=${state}`}
-                    onSet={(newState) => setTileState(row, col, newState)}
-                  />
-                );
-              })
-            )}
-          </div>
-
-          <p style={{ marginTop: 12, color: "#666" }}>
-            Jugador: click = solicitar movimiento.
-            <br />
-            GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+        {!!error && (
+          <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
+            Error: {error}
           </p>
-        </div>
-      )}
-    </main>
+        )}
+
+        {!!msg && (
+          <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
+            {msg}
+          </p>
+        )}
+
+        {!loading && player && !player.game_id && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
+          </div>
+        )}
+
+        {!loading && player?.game_id && (
+          <div style={{ marginTop: 18 }}>
+            {!player?.is_gm && (
+              <div style={{ marginBottom: 12, color: "#444" }}>
+                <p style={{ marginBottom: 6 }}>
+                  <b>Solicitud pendiente:</b>{" "}
+                  {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+                </p>
+                <p style={{ marginTop: 0, color: "#666" }}>
+                  Para pedir movimiento: haz click en una casilla.
+                </p>
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${size}, 42px)`,
+                gap: 6,
+                padding: 12,
+                background: "#000",
+                borderRadius: 12,
+                width: "fit-content",
+              }}
+            >
+              {Array.from({ length: size }).map((_, r0) =>
+                Array.from({ length: size }).map((__, c0) => {
+                  const row = r0 + 1;
+                  const col = c0 + 1;
+                  const t = tilesByRC.get(`${row}-${col}`);
+                  const state = t?.tile_state || "unknown";
+                  const value = SYMBOL[state] || "?";
+
+                  const isMe =
+                    player?.row === row &&
+                    player?.col === col &&
+                    player?.alive === true;
+
+                  return (
+                    <Cell
+                      key={`${row}-${col}`}
+                      isMe={isMe}
+                      value={value}
+                      label={`(${row}, ${col}) state=${state}`}
+                      onSet={(newState) => setTileState(row, col, newState)}
+                    />
+                  );
+                })
+              )}
+            </div>
+
+            <p style={{ marginTop: 12, color: "#666" }}>
+              Jugador: click = solicitar movimiento.
+              <br />
+              GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔,
+              doble click = ?
+            </p>
+          </div>
+        )}
+      </main>
+    </>
   );
 }
