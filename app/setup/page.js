@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
-import Nav from "../components/Nav";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -55,7 +54,7 @@ export default function SetupPage() {
       }
 
       if (!p.game_id) {
-        setError("Aún no tienes una partida. Crea una en /gm.");
+        setError("No tienes una partida activa.");
         setLoading(false);
         return;
       }
@@ -122,8 +121,6 @@ export default function SetupPage() {
     <main style={{ padding: 24, fontFamily: "system-ui" }}>
       <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
 
-      <Nav isGm />
-
       {loading && <p>Cargando…</p>}
 
       {!!error && (
@@ -166,7 +163,7 @@ export default function SetupPage() {
           </div>
 
           <h2 style={{ marginTop: 18, fontSize: 16 }}>
-            Solicitudes de movimiento (pendientes): {requests.length}
+            Solicitudes pendientes: {requests.length}
           </h2>
 
           {requests.length === 0 ? (
@@ -183,7 +180,9 @@ export default function SetupPage() {
                     background: "#fff",
                   }}
                 >
-                  <div style={{ fontWeight: 800 }}>{r.player_name || "Player"}</div>
+                  <div style={{ fontWeight: 800 }}>
+                    {r.player_name || "Player"}
+                  </div>
                   <div style={{ color: "#666", marginTop: 6 }}>
                     ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},{r.to_col})
                   </div>
