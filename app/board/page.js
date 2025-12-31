@@ -55,6 +55,7 @@ export default function BoardPage() {
 
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
+  const [myMove, setMyMove] = useState(null); // ✅ solicitud pendiente del jugador
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -67,6 +68,31 @@ export default function BoardPage() {
     for (const t of tiles) m.set(`${t.row}-${t.col}`, t);
     return m;
   }, [tiles]);
+
+  async function loadMyMove() {
+    const { data, error } = await supabase.rpc("player_get_my_move");
+    if (error) return; // si falla no bloqueamos el tablero
+    const out = Array.isArray(data) ? data[0] : data;
+    setMyMove(out || null);
+  }
+
+  async function requestMove(toRow, toCol) {
+    setError("");
+    setMsg("");
+
+    const { error } = await supabase.rpc("player_request_move", {
+      p_to_row: toRow,
+      p_to_col: toCol,
+    });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setMsg(`✅ Movimiento solicitado a (${toRow}, ${toCol}). El GM debe aprobarlo.`);
+    await loadMyMove();
+  }
 
   async function refreshTiles(p) {
     const pl = p || player;
@@ -188,6 +214,9 @@ export default function BoardPage() {
       if (!mounted) return;
       setPlayer(p);
 
+      // ✅ cargar solicitud pendiente (si existe)
+      await loadMyMove();
+
       // 4) Si aún no estás en una partida, lo mostramos claramente (sin “anda a Supabase”)
       if (!p.game_id) {
         setTiles([]);
@@ -216,6 +245,13 @@ export default function BoardPage() {
 
     if (!player?.game_id) return;
 
+    // ✅ Jugador: pedir movimiento (no revela info, solo manda coordenadas)
+    if (!player?.is_gm) {
+      await requestMove(row, col);
+      return;
+    }
+
+    // ✅ GM: puede marcar su propio mapa personal (como antes)
     const { error: uErr } = await supabase
       .from("player_map_tiles")
       .update({ tile_state: state })
@@ -256,18 +292,29 @@ export default function BoardPage() {
 
       {!loading && player && !player.game_id && (
         <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#444" }}>
-            Aún no estás unido a una partida.
-          </p>
+          <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
           <p style={{ color: "#666" }}>
-            Próximo paso: te voy a dejar una pantalla “Unirse a partida” con un código
-            para que esto sea 100% automático (sin Supabase).
+            Próximo paso: te voy a dejar una pantalla “Unirse a partida” con un
+            código para que esto sea 100% automático (sin Supabase).
           </p>
         </div>
       )}
 
       {!loading && player?.game_id && (
         <div style={{ marginTop: 18 }}>
+          {!player?.is_gm && (
+            <div style={{ marginBottom: 12, color: "#444" }}>
+              <p style={{ marginBottom: 6 }}>
+                <b>Tu solicitud pendiente:</b>{" "}
+                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+              </p>
+              <p style={{ marginTop: 0, color: "#666" }}>
+                Para pedir movimiento: haz click en una casilla del tablero.
+                (El movimiento no se aplica hasta que el GM lo apruebe en /setup)
+              </p>
+            </div>
+          )}
+
           <div
             style={{
               display: "grid",
@@ -306,7 +353,10 @@ export default function BoardPage() {
           </div>
 
           <p style={{ marginTop: 12, color: "#666" }}>
-            Controles: click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+            Controles (GM mapa personal): click = X, click derecho = †,
+            Shift+click = ⛔, doble click = ?
+            <br />
+            Controles (Jugador): click en casilla = solicitar movimiento.
           </p>
         </div>
       )}
