@@ -1,14 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
   async function handleLogin() {
+    setMessage("Iniciando sesión...");
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -17,11 +22,14 @@ export default function LoginPage() {
     if (error) {
       setMessage(error.message);
     } else {
-      setMessage("Login exitoso");
+      // ✅ redirección automática
+      router.replace("/board");
     }
   }
 
   async function handleSignup() {
+    setMessage("Creando usuario...");
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -30,7 +38,9 @@ export default function LoginPage() {
     if (error) {
       setMessage(error.message);
     } else {
-      setMessage("Usuario creado. Ahora puedes hacer login.");
+      // Puede que no haya sesión inmediata si Supabase exige confirmación por email
+      // Igual lo mandamos al board; si no hay sesión, "/" lo devolverá a /login
+      router.replace("/board");
     }
   }
 
