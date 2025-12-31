@@ -310,7 +310,7 @@ export default function BoardPage() {
               </p>
               <p style={{ marginTop: 0, color: "#666" }}>
                 Para pedir movimiento: haz click en una casilla del tablero.
-                (El movimiento no se aplica hasta que el GM lo apruebe en /setup)
+                (Tu movimiento quedará pendiente hasta la resolución de la noche.)
               </p>
             </div>
           )}
