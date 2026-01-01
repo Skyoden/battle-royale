@@ -1,5 +1,6 @@
 "use client";
 
+import Nav from "../components/Nav";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -90,6 +91,7 @@ export default function GMPage() {
   const [tiles, setTiles] = useState([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const playersByRC = useMemo(() => {
     const m = new Map();
@@ -105,8 +107,8 @@ export default function GMPage() {
   const lootByRC = useMemo(() => {
     const m = new Map();
     for (const t of tiles) {
+      if (t?.is_collected) continue;
       const key = `${t.row}-${t.col}`;
-      if (t?.is_collected) continue; // ✅ aquí
       const type = t?.loot_type;
       if (!type) continue;
       m.set(key, LOOT_EMOJI[type] || "🎁");
@@ -116,7 +118,6 @@ export default function GMPage() {
 
   async function refreshAll(gameId) {
     setError("");
-    setMsg("");
 
     const { data: ps, error: psErr } = await supabase
       .from("players")
@@ -140,6 +141,32 @@ export default function GMPage() {
       return;
     }
     setTiles(ts || []);
+  }
+
+  async function startNewGame() {
+    setBusy(true);
+    setError("");
+    setMsg("");
+
+    // ✅ ESTO crea un game NUEVO y mueve a todos los jugadores al nuevo game_id
+    const { data, error } = await supabase.rpc("gm_start_game", { p_items: 12 });
+
+    setBusy(false);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    const out = Array.isArray(data) ? data[0] : data;
+
+    if (!out?.game_id || !out?.code) {
+      setError("El RPC se ejecutó pero no devolvió {game_id, code}.");
+      return;
+    }
+
+    setMsg(`✅ Partida NUEVA creada.\nCódigo: ${out.code}`);
+    await refreshAll(out.game_id);
   }
 
   async function movePlayerTo(playerId, row, col) {
@@ -212,133 +239,154 @@ export default function GMPage() {
   }, [router]);
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginTop: 0 }}>GM</h1>
+    <>
+      <Nav isGm={true} />
+      <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
+        <h1 style={{ marginTop: 0 }}>GM</h1>
 
-      {loading && <p>Cargando…</p>}
+        {loading && <p>Cargando…</p>}
 
-      {!!error && (
-        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
-      )}
-      {!!msg && (
-        <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
-      )}
+        {!!error && (
+          <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
+        )}
+        {!!msg && (
+          <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
+        )}
 
-      {!loading && me && (
-        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 18 }}>
-          <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h2 style={{ margin: 0, fontSize: 16 }}>Jugadores ({players.length})</h2>
-              <button
-                onClick={() => refreshAll(me.game_id)}
-                style={{
-                  marginLeft: "auto",
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #bbb",
-                  background: "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Refrescar
-              </button>
-            </div>
-
-            <p style={{ marginTop: 10, color: "#666" }}>Arrastra un jugador y suéltalo en una casilla.</p>
-
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {players.map((p) => {
-                const bullets = p?.bullets ?? 0;
-                const inv = Array.isArray(p?.inventory) ? p.inventory : [];
-                return (
-                  <div
-                    key={p.id}
-                    draggable
-                    onDragStart={(e) => e.dataTransfer.setData("text/player_id", p.id)}
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "center",
-                      border: "1px solid #e5e5e5",
-                      borderRadius: 12,
-                      padding: 10,
-                      background: "#fff",
-                      cursor: "grab",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 10,
-                        background: "#2d6a4f",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 900,
-                      }}
-                    >
-                      {initials(p.name)}
-                    </div>
-
-                    <div style={{ lineHeight: 1.2 }}>
-                      <div style={{ fontWeight: 800 }}>{p.is_gm ? "GM " : ""}{p.name || "Player"}</div>
-                      <div style={{ color: "#666", fontSize: 13 }}>
-                        ({p.row ?? "?"},{p.col ?? "?"}) · {p.alive ? "Vivo" : "Muerto"} · vidas {p.lives ?? 0} · balas {bullets}
-                      </div>
-                      <div style={{ color: "#666", fontSize: 12 }}>
-                        inventario: {inv.length ? inv.join(", ") : "[]"}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>Tablero completo (GM)</h2>
-
-            <div
+        {!loading && me && (
+          <div style={{ marginBottom: 14 }}>
+            <button
+              onClick={startNewGame}
+              disabled={busy}
               style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${SIZE}, 54px)`,
-                gap: 8,
-                padding: 14,
-                background: "#000",
-                borderRadius: 14,
-                width: "fit-content",
-                marginTop: 10,
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #bbb",
+                cursor: busy ? "not-allowed" : "pointer",
+                background: "#fff",
               }}
             >
-              {Array.from({ length: SIZE }).map((_, r0) =>
-                Array.from({ length: SIZE }).map((__, c0) => {
-                  const row = r0 + 1;
-                  const col = c0 + 1;
-                  const key = `${row}-${col}`;
-                  const playersHere = playersByRC.get(key) || [];
-                  const lootEmoji = lootByRC.get(key) || "";
+              {busy ? "Creando..." : "Iniciar partida (NUEVA) + random"}
+            </button>
+          </div>
+        )}
+
+        {!loading && me && (
+          <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 18 }}>
+            <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <h2 style={{ margin: 0, fontSize: 16 }}>Jugadores ({players.length})</h2>
+                <button
+                  onClick={() => refreshAll(me.game_id)}
+                  style={{
+                    marginLeft: "auto",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #bbb",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Refrescar
+                </button>
+              </div>
+
+              <p style={{ marginTop: 10, color: "#666" }}>Arrastra un jugador y suéltalo en una casilla.</p>
+
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {players.map((p) => {
+                  const bullets = p?.bullets ?? 0;
+                  const inv = Array.isArray(p?.inventory) ? p.inventory : [];
                   return (
-                    <GMCell
-                      key={key}
-                      row={row}
-                      col={col}
-                      playersHere={playersHere}
-                      lootEmoji={lootEmoji}
-                      onDropPlayer={movePlayerTo}
-                    />
+                    <div
+                      key={p.id}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData("text/player_id", p.id)}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        border: "1px solid #e5e5e5",
+                        borderRadius: 12,
+                        padding: 10,
+                        background: "#fff",
+                        cursor: "grab",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: 10,
+                          background: "#2d6a4f",
+                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {initials(p.name)}
+                      </div>
+
+                      <div style={{ lineHeight: 1.2 }}>
+                        <div style={{ fontWeight: 800 }}>{p.is_gm ? "GM " : ""}{p.name || "Player"}</div>
+                        <div style={{ color: "#666", fontSize: 13 }}>
+                          ({p.row ?? "?"},{p.col ?? "?"}) · {p.alive ? "Vivo" : "Muerto"} · vidas {p.lives ?? 0} · balas {bullets}
+                        </div>
+                        <div style={{ color: "#666", fontSize: 12 }}>
+                          inventario: {inv.length ? inv.join(", ") : "[]"}
+                        </div>
+                      </div>
+                    </div>
                   );
-                })
-              )}
+                })}
+              </div>
             </div>
 
-            <p style={{ marginTop: 10, color: "#666" }}>
-              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
-            </p>
+            <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>Tablero completo (GM)</h2>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${SIZE}, 54px)`,
+                  gap: 8,
+                  padding: 14,
+                  background: "#000",
+                  borderRadius: 14,
+                  width: "fit-content",
+                  marginTop: 10,
+                }}
+              >
+                {Array.from({ length: SIZE }).map((_, r0) =>
+                  Array.from({ length: SIZE }).map((__, c0) => {
+                    const row = r0 + 1;
+                    const col = c0 + 1;
+                    const key = `${row}-${col}`;
+                    const playersHere = playersByRC.get(key) || [];
+                    const lootEmoji = lootByRC.get(key) || "";
+                    return (
+                      <GMCell
+                        key={key}
+                        row={row}
+                        col={col}
+                        playersHere={playersHere}
+                        lootEmoji={lootEmoji}
+                        onDropPlayer={movePlayerTo}
+                      />
+                    );
+                  })
+                )}
+              </div>
+
+              <p style={{ marginTop: 10, color: "#666" }}>
+                Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
+              </p>
+            </div>
           </div>
-        </div>
-      )}
-    </main>
+        )}
+      </main>
+    </>
   );
 }
