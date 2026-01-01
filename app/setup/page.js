@@ -1,5 +1,6 @@
 "use client";
 
+import Nav from "../components/Nav";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -12,6 +13,7 @@ export default function SetupPage() {
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [itemCount, setItemCount] = useState(12);
 
   useEffect(() => {
     let mounted = true;
@@ -88,7 +90,7 @@ export default function SetupPage() {
     try {
       const { error: e } = await supabase.rpc("gm_resolve_move_request", {
         p_request_id: requestId,
-        p_action: action, // 'approved' | 'rejected'
+        p_action: action,
       });
       if (e) {
         setError(e.message);
@@ -117,112 +119,172 @@ export default function SetupPage() {
     }
   }
 
+  async function startGame() {
+    setError("");
+    setMsg("");
+    setBusy(true);
+    try {
+      const { data, error: e } = await supabase.rpc("gm_start_game", {
+        p_item_count: Number(itemCount) || 12,
+      });
+      if (e) {
+        setError(e.message);
+        return;
+      }
+      setMsg(
+        `✅ Partida iniciada.\nJugadores: ${data?.players ?? "?"}\nObjetos: ${data?.items ?? "?"}\n(Se randomizaron posiciones y se repartieron objetos.)`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui" }}>
-      <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
+    <>
+      <Nav isGm={true} />
 
-      {loading && <p>Cargando…</p>}
+      <main style={{ padding: 24, fontFamily: "system-ui" }}>
+        <h1 style={{ marginTop: 0 }}>Setup (GM)</h1>
 
-      {!!error && (
-        <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>Error: {error}</p>
-      )}
-      {!!msg && (
-        <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
-      )}
+        {loading && <p>Cargando…</p>}
 
-      {!loading && me && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button
-              onClick={refresh}
-              disabled={busy}
+        {!!error && (
+          <p style={{ color: "crimson", whiteSpace: "pre-wrap" }}>
+            Error: {error}
+          </p>
+        )}
+        {!!msg && (
+          <p style={{ color: "#1b4332", whiteSpace: "pre-wrap" }}>{msg}</p>
+        )}
+
+        {!loading && me && (
+          <div style={{ marginTop: 12 }}>
+            <div
               style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #bbb",
-                cursor: busy ? "not-allowed" : "pointer",
-                background: "#fff",
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                alignItems: "center",
               }}
             >
-              Refrescar solicitudes
-            </button>
+              <button
+                onClick={refresh}
+                disabled={busy}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #bbb",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  background: "#fff",
+                }}
+              >
+                Refrescar solicitudes
+              </button>
 
-            <button
-              onClick={applyAll}
-              disabled={busy}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #bbb",
-                cursor: busy ? "not-allowed" : "pointer",
-                background: "#fff",
-              }}
-            >
-              Aplicar movimientos aprobados
-            </button>
-          </div>
+              <button
+                onClick={applyAll}
+                disabled={busy}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #bbb",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  background: "#fff",
+                }}
+              >
+                Aplicar movimientos aprobados
+              </button>
 
-          <h2 style={{ marginTop: 18, fontSize: 16 }}>
-            Solicitudes pendientes: {requests.length}
-          </h2>
-
-          {requests.length === 0 ? (
-            <p style={{ color: "#666" }}>No hay solicitudes pendientes.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-              {requests.map((r) => (
-                <div
-                  key={r.request_id}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ color: "#666" }}>Objetos:</span>
+                <input
+                  value={itemCount}
+                  onChange={(e) => setItemCount(e.target.value)}
                   style={{
-                    border: "1px solid #e5e5e5",
-                    borderRadius: 12,
-                    padding: 12,
+                    width: 70,
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    border: "1px solid #bbb",
+                  }}
+                />
+                <button
+                  onClick={startGame}
+                  disabled={busy}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #bbb",
+                    cursor: busy ? "not-allowed" : "pointer",
                     background: "#fff",
+                    fontWeight: 700,
                   }}
                 >
-                  <div style={{ fontWeight: 800 }}>
-                    {r.player_name || "Player"}
-                  </div>
-
-                  <div style={{ color: "#666", marginTop: 6 }}>
-                    ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},{r.to_col})
-                  </div>
-
-                  <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                    <button
-                      onClick={() => resolve(r.request_id, "approved")}
-                      disabled={busy}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #bbb",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        background: "#fff",
-                      }}
-                    >
-                      Aprobar
-                    </button>
-
-                    <button
-                      onClick={() => resolve(r.request_id, "rejected")}
-                      disabled={busy}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #bbb",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        background: "#fff",
-                      }}
-                    >
-                      Rechazar
-                    </button>
-                  </div>
-                </div>
-              ))}
+                  Iniciar partida (random + objetos)
+                </button>
+              </div>
             </div>
-          )}
-        </div>
-      )}
-    </main>
+
+            <h2 style={{ marginTop: 18, fontSize: 16 }}>
+              Solicitudes pendientes: {requests.length}
+            </h2>
+
+            {requests.length === 0 ? (
+              <p style={{ color: "#666" }}>No hay solicitudes pendientes.</p>
+            ) : (
+              <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                {requests.map((r) => (
+                  <div
+                    key={r.request_id}
+                    style={{
+                      border: "1px solid #e5e5e5",
+                      borderRadius: 12,
+                      padding: 12,
+                      background: "#fff",
+                    }}
+                  >
+                    <div style={{ fontWeight: 800 }}>
+                      {r.player_name || "Player"}
+                    </div>
+                    <div style={{ color: "#666", marginTop: 6 }}>
+                      ({r.from_row ?? "?"},{r.from_col ?? "?"}) → ({r.to_row},
+                      {r.to_col})
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                      <button
+                        onClick={() => resolve(r.request_id, "approved")}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #bbb",
+                          cursor: busy ? "not-allowed" : "pointer",
+                          background: "#fff",
+                        }}
+                      >
+                        Aprobar
+                      </button>
+                      <button
+                        onClick={() => resolve(r.request_id, "rejected")}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px solid #bbb",
+                          cursor: busy ? "not-allowed" : "pointer",
+                          background: "#fff",
+                        }}
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </>
   );
 }
