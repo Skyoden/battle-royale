@@ -14,7 +14,6 @@ const LOOT_EMOJI = {
   gas: "⛽",
   bike: "🏍️",
   trap: "🪤",
-  loot: "🎁",
 };
 
 function initials(name) {
@@ -335,7 +334,7 @@ export default function GMPage() {
             </div>
 
             <p style={{ marginTop: 10, color: "#666" }}>
-              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa · 🎁 loot
+              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
             </p>
           </div>
         </div>
