@@ -166,7 +166,7 @@ export default function GMPage() {
     }
 
     setMsg(`✅ Partida NUEVA creada.\nCódigo: ${out.game_code}`);
-    await refreshAll(out.game_id);
+    await refreshAll(out.game_uuid);
   }
 
   async function movePlayerTo(playerId, row, col) {
