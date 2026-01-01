@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
+// Estados del mapa personal (GM)
 const SYMBOL = {
   unknown: "?",
   empty: "X",
@@ -12,21 +13,25 @@ const SYMBOL = {
   loot: "★",
 };
 
-function gmObjectEmoji(type) {
-  if (type === "life") return "❤️";
-  if (type === "bullet") return "🔫"; // si quieres más neutro: "🎯"
-  if (type === "loot") return "🎁";
-  return "★";
-}
-
-function Cell({ isMe, value, label, onClick }) {
+function Cell({ isMe, value, label, onSet, isGm }) {
   return (
     <div
       onClick={(e) => {
         e.preventDefault();
-        onClick(e);
+        if (!isGm) return onSet("move"); // jugador: pedir movimiento
+        if (e.shiftKey) onSet("blocked");
+        else onSet("empty");
       }}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!isGm) return;
+        onSet("corpse");
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        if (!isGm) return;
+        onSet("unknown");
+      }}
       style={{
         width: 42,
         height: 42,
@@ -54,9 +59,6 @@ export default function BoardPage() {
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
   const [myMove, setMyMove] = useState(null);
-  const [inventory, setInventory] = useState([]);
-  const [gmObjects, setGmObjects] = useState([]);
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -69,35 +71,11 @@ export default function BoardPage() {
     return m;
   }, [tiles]);
 
-  const objectsByRC = useMemo(() => {
-    const m = new Map();
-    for (const o of gmObjects || []) {
-      if (!o.claimed_by_player_id) m.set(`${o.row}-${o.col}`, o);
-    }
-    return m;
-  }, [gmObjects]);
-
   async function loadMyMove() {
     const { data, error } = await supabase.rpc("player_get_my_move");
     if (error) return;
     const out = Array.isArray(data) ? data[0] : data;
     setMyMove(out || null);
-  }
-
-  async function loadInventory() {
-    const { data, error } = await supabase.rpc("player_get_inventory");
-    if (error) return;
-    setInventory(Array.isArray(data) ? data : []);
-  }
-
-  async function loadGmObjectsIfGm(isGm) {
-    if (!isGm) {
-      setGmObjects([]);
-      return;
-    }
-    const { data, error } = await supabase.rpc("gm_dashboard");
-    if (error) return;
-    setGmObjects(data?.objects || []);
   }
 
   async function requestMove(toRow, toCol) {
@@ -222,8 +200,6 @@ export default function BoardPage() {
       setPlayer(p);
 
       await loadMyMove();
-      await loadInventory();
-      await loadGmObjectsIfGm(!!p.is_gm);
 
       if (!p.game_id) {
         setTiles([]);
@@ -243,25 +219,19 @@ export default function BoardPage() {
     };
   }, [router]);
 
-  function invText() {
-    const rows = (inventory || []).filter((x) => (x.qty ?? 0) > 0);
-    if (rows.length === 0) return "—";
-    return rows.map((x) => `${x.object_type} x${x.qty}`).join(", ");
-  }
-
-  async function onCellClick(row, col, e) {
+  async function setTileState(row, col, state) {
     setError("");
     setMsg("");
 
     if (!player?.game_id) return;
 
+    // Jugador: click = solicitar movimiento
     if (!player?.is_gm) {
       await requestMove(row, col);
       return;
     }
 
-    const state = e.shiftKey ? "blocked" : "empty";
-
+    // GM: edita su mapa personal
     const { error: uErr } = await supabase
       .from("player_map_tiles")
       .update({ tile_state: state })
@@ -276,13 +246,15 @@ export default function BoardPage() {
     }
 
     setTiles((prev) =>
-      prev.map((t) => (t.row === row && t.col === col ? { ...t, tile_state: state } : t))
+      prev.map((t) =>
+        t.row === row && t.col === col ? { ...t, tile_state: state } : t
+      )
     );
   }
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
+      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM (Tablero)" : "Tablero"}</h1>
 
       {loading && <p>Cargando…</p>}
 
@@ -298,38 +270,6 @@ export default function BoardPage() {
         </p>
       )}
 
-      {!loading && player && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            border: "1px solid #eee",
-            borderRadius: 12,
-            background: "#fff",
-            maxWidth: 760,
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Tu estado</div>
-          <div style={{ color: "#333" }}>
-            <b>Vidas:</b> {player.lives ?? 0} <b>Balas:</b> {player.bullets ?? 0}{" "}
-            <b>Inventario:</b> {invText()}
-          </div>
-
-          {!player?.is_gm && (
-            <div style={{ marginTop: 8, color: "#444" }}>
-              <b>Solicitud pendiente:</b>{" "}
-              {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
-            </div>
-          )}
-
-          {player?.is_gm && (
-            <div style={{ marginTop: 8, color: "#666" }}>
-              Leyenda GM: ❤️ vida, 🔫 bala, 🎁 loot
-            </div>
-          )}
-        </div>
-      )}
-
       {!loading && player && !player.game_id && (
         <div style={{ marginTop: 12 }}>
           <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
@@ -338,6 +278,18 @@ export default function BoardPage() {
 
       {!loading && player?.game_id && (
         <div style={{ marginTop: 18 }}>
+          {!player?.is_gm && (
+            <div style={{ marginBottom: 12, color: "#444" }}>
+              <p style={{ marginBottom: 6 }}>
+                <b>Solicitud pendiente:</b>{" "}
+                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+              </p>
+              <p style={{ marginTop: 0, color: "#666" }}>
+                Para pedir movimiento: haz click en una casilla.
+              </p>
+            </div>
+          )}
+
           <div
             style={{
               display: "grid",
@@ -353,15 +305,9 @@ export default function BoardPage() {
               Array.from({ length: size }).map((__, c0) => {
                 const row = r0 + 1;
                 const col = c0 + 1;
-
                 const t = tilesByRC.get(`${row}-${col}`);
                 const state = t?.tile_state || "unknown";
-                let value = SYMBOL[state] || "?";
-
-                if (player?.is_gm) {
-                  const obj = objectsByRC.get(`${row}-${col}`);
-                  if (obj) value = gmObjectEmoji(obj.object_type);
-                }
+                const value = SYMBOL[state] || "?";
 
                 const isMe =
                   player?.row === row &&
@@ -373,8 +319,12 @@ export default function BoardPage() {
                     key={`${row}-${col}`}
                     isMe={isMe}
                     value={value}
-                    label={`(${row}, ${col})`}
-                    onClick={(e) => onCellClick(row, col, e)}
+                    label={`(${row}, ${col}) state=${state}`}
+                    isGm={!!player?.is_gm}
+                    onSet={(newState) => {
+                      if (newState === "move") return requestMove(row, col);
+                      return setTileState(row, col, newState);
+                    }}
                   />
                 );
               })
@@ -382,9 +332,22 @@ export default function BoardPage() {
           </div>
 
           <p style={{ marginTop: 12, color: "#666" }}>
-            Jugador: click = solicitar movimiento.
-            <br />
-            GM: ❤️/🔫/🎁 = objeto en la casilla (solo GM lo ve).
+            {player?.is_gm ? (
+              <>
+                GM (mapa personal): click = X · click derecho = † · Shift+click = ⛔ · doble
+                click = ?
+                <br />
+                Objetos del mapa GM: 🔫①/②/③ balas · 🔭 binoculares · 🦺 chaleco · ⛽🔥 bencina ·
+                🏍️ moto · 🪤 trampa
+              </>
+            ) : (
+              <>
+                Jugador: click en casilla = solicitar movimiento.
+                <br />
+                Objetos: 🔫①/②/③ balas · 🔭 binoculares · 🦺 chaleco · ⛽🔥 bencina · 🏍️ moto ·
+                🪤 trampa
+              </>
+            )}
           </p>
         </div>
       )}
