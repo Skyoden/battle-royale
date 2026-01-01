@@ -20,7 +20,6 @@ const LOOT_EMOJI = {
   gas: "⛽",
   bike: "🏍️",
   trap: "🪤",
-  loot: "🎁",
 };
 
 function Cell({ isMe, value, label, onSet }) {
