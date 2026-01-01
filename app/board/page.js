@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
-// Estados del mapa personal (GM)
+// Mapea el estado a lo que se ve en el tablero (tu mapa personal GM)
 const SYMBOL = {
   unknown: "?",
   empty: "X",
@@ -13,23 +13,20 @@ const SYMBOL = {
   loot: "★",
 };
 
-function Cell({ isMe, value, label, onSet, isGm }) {
+function Cell({ isMe, value, label, onSet }) {
   return (
     <div
       onClick={(e) => {
         e.preventDefault();
-        if (!isGm) return onSet("move"); // jugador: pedir movimiento
         if (e.shiftKey) onSet("blocked");
         else onSet("empty");
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        if (!isGm) return;
         onSet("corpse");
       }}
       onDoubleClick={(e) => {
         e.preventDefault();
-        if (!isGm) return;
         onSet("unknown");
       }}
       style={{
@@ -254,7 +251,7 @@ export default function BoardPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM (Tablero)" : "Tablero"}</h1>
+      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
 
       {loading && <p>Cargando…</p>}
 
@@ -320,11 +317,7 @@ export default function BoardPage() {
                     isMe={isMe}
                     value={value}
                     label={`(${row}, ${col}) state=${state}`}
-                    isGm={!!player?.is_gm}
-                    onSet={(newState) => {
-                      if (newState === "move") return requestMove(row, col);
-                      return setTileState(row, col, newState);
-                    }}
+                    onSet={(newState) => setTileState(row, col, newState)}
                   />
                 );
               })
@@ -332,22 +325,11 @@ export default function BoardPage() {
           </div>
 
           <p style={{ marginTop: 12, color: "#666" }}>
-            {player?.is_gm ? (
-              <>
-                GM (mapa personal): click = X · click derecho = † · Shift+click = ⛔ · doble
-                click = ?
-                <br />
-                Objetos del mapa GM: 🔫①/②/③ balas · 🔭 binoculares · 🦺 chaleco · ⛽🔥 bencina ·
-                🏍️ moto · 🪤 trampa
-              </>
-            ) : (
-              <>
-                Jugador: click en casilla = solicitar movimiento.
-                <br />
-                Objetos: 🔫①/②/③ balas · 🔭 binoculares · 🦺 chaleco · ⛽🔥 bencina · 🏍️ moto ·
-                🪤 trampa
-              </>
-            )}
+            Jugador: click = solicitar movimiento.
+            <br />
+            GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+            <br />
+            Objetos (referencia): 🔫(1/2/3) balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
           </p>
         </div>
       )}
