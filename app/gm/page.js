@@ -6,39 +6,101 @@ import { supabase } from "../lib/supabase";
 
 const SIZE = 8;
 
+const LOOT_EMOJI = {
+  life: "❤️",
+  bullet: "🔫",
+  binoculars: "🔭",
+  vest: "🦺",
+  gas: "⛽",
+  bike: "🏍️",
+  trap: "🪤",
+  loot: "🎁", // "loot" = caja sorpresa (premio aleatorio)
+};
+
 function initials(name) {
-  const n = (name || "Player").trim();
-  const parts = n.split(/\s+/).slice(0, 2);
-  return parts.map((p) => (p[0] || "").toUpperCase()).join("");
+  const s = (name || "Player").trim();
+  const parts = s.split(/\s+/).filter(Boolean);
+  const a = (parts[0]?.[0] || "P").toUpperCase();
+  const b = (parts[1]?.[0] || parts[0]?.[1] || "").toUpperCase();
+  return (a + b).slice(0, 2);
 }
 
-function lootEmoji(type, qty) {
-  if (!type) return "";
-  if (type === "ammo") return qty >= 3 ? "🔫🔫🔫" : qty === 2 ? "🔫🔫" : "🔫";
-  if (type === "binoculars") return "🔭";
-  if (type === "vest") return "🦺";
-  if (type === "gas") return "⛽";
-  if (type === "moto") return "🏍️";
-  if (type === "trap") return "🪤";
-  return "🎁";
+function GMCell({ playersHere, lootEmoji, row, col, onDropPlayer }) {
+  const hasPlayers = playersHere?.length > 0;
+
+  // Texto dentro de la casilla:
+  // - 1 jugador: iniciales
+  // - 2+ jugadores: "2", "3", ...
+  // - si no hay jugador, pero hay objeto: emoji
+  // - si no: vacío
+  let content = "";
+  if (hasPlayers) {
+    content =
+      playersHere.length === 1 ? initials(playersHere[0].name) : String(playersHere.length);
+  } else if (lootEmoji) {
+    content = lootEmoji;
+  }
+
+  return (
+    <div
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const playerId = e.dataTransfer.getData("text/player_id");
+        if (playerId) onDropPlayer(playerId, row, col);
+      }}
+      style={{
+        width: 54,
+        height: 54,
+        borderRadius: 10,
+        background: "#111",
+        border: "1px solid #222",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        color: "#eee",
+        fontWeight: 800,
+        userSelect: "none",
+      }}
+      title={`(${row}, ${col})`}
+    >
+      <div style={{ position: "absolute", top: 6, left: 8, fontSize: 10, color: "#666" }}>
+        {row},{col}
+      </div>
+
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          background: hasPlayers ? "#2d6a4f" : "transparent",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: lootEmoji && !hasPlayers ? 18 : 14,
+        }}
+      >
+        {content}
+      </div>
+    </div>
+  );
 }
 
 export default function GMPage() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [me, setMe] = useState(null);
+  const [players, setPlayers] = useState([]);
+  const [tiles, setTiles] = useState([]); // game_tiles
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
-  const [me, setMe] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [tiles, setTiles] = useState([]);
-
-  const playersByCell = useMemo(() => {
+  const playersByRC = useMemo(() => {
     const m = new Map();
     for (const p of players) {
-      if (!p.row || !p.col) continue;
+      if (!p?.row || !p?.col) continue;
       const key = `${p.row}-${p.col}`;
       if (!m.has(key)) m.set(key, []);
       m.get(key).push(p);
@@ -46,9 +108,16 @@ export default function GMPage() {
     return m;
   }, [players]);
 
-  const tileByCell = useMemo(() => {
+  const lootByRC = useMemo(() => {
     const m = new Map();
-    for (const t of tiles) m.set(`${t.row}-${t.col}`, t);
+    for (const t of tiles) {
+      const key = `${t.row}-${t.col}`;
+      // Solo mostramos objeto si NO está recogido
+      if (t?.looted_at) continue;
+      const type = t?.loot_type;
+      if (!type) continue;
+      m.set(key, LOOT_EMOJI[type] || "🎁");
+    }
     return m;
   }, [tiles]);
 
@@ -75,14 +144,8 @@ export default function GMPage() {
       .eq("user_id", u.user.id)
       .maybeSingle();
 
-    if (pErr) {
-      setError(pErr.message);
-      setLoading(false);
-      return;
-    }
-
-    if (!p) {
-      setError("No existe tu perfil en players.");
+    if (pErr || !p) {
+      setError(pErr?.message || "No existe tu perfil en players.");
       setLoading(false);
       return;
     }
@@ -100,6 +163,7 @@ export default function GMPage() {
     }
 
     setMe(p);
+
     await refreshAll(p.game_id);
 
     setLoading(false);
@@ -107,11 +171,12 @@ export default function GMPage() {
 
   async function refreshAll(gameId) {
     setError("");
+    setMsg("");
 
-    // Players
+    // 1) jugadores de la partida
     const { data: ps, error: psErr } = await supabase
       .from("players")
-      .select("id,user_id,name,is_gm,alive,lives,ammo,row,col,inventory,game_id")
+      .select("*")
       .eq("game_id", gameId)
       .order("created_at", { ascending: true });
 
@@ -121,43 +186,40 @@ export default function GMPage() {
     }
     setPlayers(ps || []);
 
-    // Tiles (objetos)
+    // 2) objetos del mapa (game_tiles)
     const { data: ts, error: tsErr } = await supabase
       .from("game_tiles")
-      .select("row,col,loot_type,loot_qty,is_collected")
-      .eq("game_id", gameId);
+      .select("*")
+      .eq("game_id", gameId)
+      .order("row", { ascending: true })
+      .order("col", { ascending: true });
 
     if (tsErr) {
-      setError(
-        `No pude leer objetos desde tabla "game_tiles".\nDetalle: ${tsErr.message}`
-      );
+      setError(tsErr.message);
       return;
     }
     setTiles(ts || []);
   }
 
-  async function movePlayer(playerId, toRow, toCol) {
+  async function movePlayerTo(playerId, row, col) {
     if (!me?.game_id) return;
 
-    setBusy(true);
     setError("");
     setMsg("");
-    try {
-      const { error: uErr } = await supabase
-        .from("players")
-        .update({ row: toRow, col: toCol })
-        .eq("id", playerId)
-        .eq("game_id", me.game_id);
 
-      if (uErr) {
-        setError(uErr.message);
-        return;
-      }
+    const { error: e } = await supabase.rpc("gm_force_move_player", {
+      p_player_id: playerId,
+      p_row: row,
+      p_col: col,
+    });
 
-      await refreshAll(me.game_id);
-    } finally {
-      setBusy(false);
+    if (e) {
+      setError(e.message);
+      return;
     }
+
+    setMsg("✅ Jugador movido.");
+    await refreshAll(me.game_id);
   }
 
   useEffect(() => {
@@ -167,7 +229,7 @@ export default function GMPage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginTop: 0, marginBottom: 10 }}>GM</h1>
+      <h1 style={{ marginTop: 0 }}>GM</h1>
 
       {loading && <p>Cargando…</p>}
 
@@ -179,186 +241,142 @@ export default function GMPage() {
       )}
 
       {!loading && me && (
-        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 18 }}>
-          {/* Lista jugadores */}
+        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 18 }}>
+          {/* Panel jugadores */}
           <div
             style={{
-              border: "1px solid #e5e5e5",
+              border: "1px solid #eee",
               borderRadius: 14,
               padding: 14,
               background: "#fff",
-              height: "fit-content",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ fontWeight: 900 }}>Jugadores ({players.length})</div>
-
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 16 }}>Jugadores ({players.length})</h2>
               <button
                 onClick={() => refreshAll(me.game_id)}
-                disabled={busy}
                 style={{
+                  marginLeft: "auto",
                   padding: "8px 12px",
                   borderRadius: 10,
                   border: "1px solid #bbb",
-                  cursor: busy ? "not-allowed" : "pointer",
                   background: "#fff",
+                  cursor: "pointer",
                 }}
               >
                 Refrescar
               </button>
             </div>
 
-            <p style={{ marginTop: 10, color: "#666", marginBottom: 10 }}>
+            <p style={{ marginTop: 10, color: "#666" }}>
               Arrastra un jugador y suéltalo en una casilla.
             </p>
 
-            <div style={{ display: "grid", gap: 10 }}>
-              {players.map((p) => (
-                <div
-                  key={p.id}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", String(p.id));
-                  }}
-                  style={{
-                    border: "1px solid #eee",
-                    borderRadius: 12,
-                    padding: 10,
-                    background: "#fff",
-                    display: "grid",
-                    gridTemplateColumns: "40px 1fr",
-                    gap: 10,
-                    alignItems: "center",
-                    cursor: "grab",
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                  title="Arrastra al tablero"
-                >
+            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+              {players.map((p) => {
+                const bullets = p?.bullets ?? 0; // ✅ NO usamos ammo
+                const inv = Array.isArray(p?.inventory) ? p.inventory : [];
+                return (
                   <div
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 12,
-                      background: "#2d6a4f",
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 900,
+                    key={p.id}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/player_id", p.id);
                     }}
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      border: "1px solid #e5e5e5",
+                      borderRadius: 12,
+                      padding: 10,
+                      background: "#fff",
+                      cursor: "grab",
+                    }}
+                    title="Arrastra al tablero"
                   >
-                    {initials(p.is_gm ? `GM ${p.name || ""}` : p.name)}
-                  </div>
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        background: "#2d6a4f",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 900,
+                      }}
+                    >
+                      {initials(p.name)}
+                    </div>
 
-                  <div>
-                    <div style={{ fontWeight: 900 }}>
-                      {p.is_gm ? `GM ${p.name || "Player"}` : p.name || "Player"}
-                    </div>
-                    <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>
-                      ({p.row ?? "?"},{p.col ?? "?"}) ·{" "}
-                      {p.alive ? "Vivo" : "Muerto"} · vidas {p.lives ?? 0} · balas{" "}
-                      {p.ammo ?? 0}
-                    </div>
-                    <div style={{ color: "#666", fontSize: 13, marginTop: 2 }}>
-                      inventario: {p.inventory ? JSON.stringify(p.inventory) : "[]"}
+                    <div style={{ lineHeight: 1.2 }}>
+                      <div style={{ fontWeight: 800 }}>
+                        {p.is_gm ? "GM " : ""}
+                        {p.name || "Player"}
+                      </div>
+                      <div style={{ color: "#666", fontSize: 13 }}>
+                        ({p.row ?? "?"},{p.col ?? "?"}) · {p.alive ? "Vivo" : "Muerto"} ·
+                        vidas {p.lives ?? 0} · balas {bullets}
+                      </div>
+                      <div style={{ color: "#666", fontSize: 12 }}>
+                        inventario: {inv.length ? inv.join(", ") : "[]"}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          {/* Tablero GM */}
+          {/* Tablero completo GM */}
           <div
             style={{
-              border: "1px solid #e5e5e5",
+              border: "1px solid #eee",
               borderRadius: 14,
               padding: 14,
               background: "#fff",
             }}
           >
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>
-              Tablero completo (GM)
-            </div>
+            <h2 style={{ margin: 0, fontSize: 16 }}>Tablero completo (GM)</h2>
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(${SIZE}, 60px)`,
+                gridTemplateColumns: `repeat(${SIZE}, 54px)`,
                 gap: 8,
                 padding: 14,
                 background: "#000",
-                borderRadius: 16,
+                borderRadius: 14,
                 width: "fit-content",
+                marginTop: 10,
               }}
             >
               {Array.from({ length: SIZE }).map((_, r0) =>
                 Array.from({ length: SIZE }).map((__, c0) => {
                   const row = r0 + 1;
                   const col = c0 + 1;
-
-                  const cellPlayers = playersByCell.get(`${row}-${col}`) || [];
-                  const t = tileByCell.get(`${row}-${col}`);
-                  const loot = t && !t.is_collected ? lootEmoji(t.loot_type, t.loot_qty) : "";
-
+                  const key = `${row}-${col}`;
+                  const playersHere = playersByRC.get(key) || [];
+                  const lootEmoji = lootByRC.get(key) || "";
                   return (
-                    <div
-                      key={`${row}-${col}`}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const pid = e.dataTransfer.getData("text/plain");
-                        if (!pid) return;
-                        movePlayer(pid, row, col);
-                      }}
-                      style={{
-                        width: 60,
-                        height: 60,
-                        borderRadius: 12,
-                        border: "1px solid #222",
-                        background: "#111",
-                        color: "#bbb",
-                        position: "relative",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        userSelect: "none",
-                      }}
-                      title={`(${row},${col})`}
-                    >
-                      <div style={{ position: "absolute", top: 6, left: 8, fontSize: 11, color: "#666" }}>
-                        {row},{col}
-                      </div>
-
-                      {loot && (
-                        <div style={{ position: "absolute", bottom: 6, left: 8, fontSize: 16 }}>
-                          {loot}
-                        </div>
-                      )}
-
-                      {cellPlayers.length > 0 && (
-                        <div
-                          style={{
-                            padding: "6px 8px",
-                            borderRadius: 10,
-                            background: "#2d6a4f",
-                            color: "#fff",
-                            fontWeight: 900,
-                            fontSize: 12,
-                          }}
-                        >
-                          {cellPlayers.slice(0, 3).map((p) => initials(p.is_gm ? `GM ${p.name || ""}` : p.name)).join("")}
-                          {cellPlayers.length > 3 ? "+" : ""}
-                        </div>
-                      )}
-                    </div>
+                    <GMCell
+                      key={key}
+                      row={row}
+                      col={col}
+                      playersHere={playersHere}
+                      lootEmoji={lootEmoji}
+                      onDropPlayer={movePlayerTo}
+                    />
                   );
                 })
               )}
             </div>
 
             <p style={{ marginTop: 10, color: "#666" }}>
-              Leyenda objetos: 🔫(1/2/3) balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
+              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina ·
+              🏍️ moto · 🪤 trampa · 🎁 loot (premio sorpresa)
             </p>
           </div>
         </div>
