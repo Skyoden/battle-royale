@@ -14,7 +14,7 @@ const LOOT_EMOJI = {
   gas: "⛽",
   bike: "🏍️",
   trap: "🪤",
-  loot: "🎁", // "loot" = caja sorpresa (premio aleatorio)
+  loot: "🎁",
 };
 
 function initials(name) {
@@ -28,11 +28,6 @@ function initials(name) {
 function GMCell({ playersHere, lootEmoji, row, col, onDropPlayer }) {
   const hasPlayers = playersHere?.length > 0;
 
-  // Texto dentro de la casilla:
-  // - 1 jugador: iniciales
-  // - 2+ jugadores: "2", "3", ...
-  // - si no hay jugador, pero hay objeto: emoji
-  // - si no: vacío
   let content = "";
   if (hasPlayers) {
     content =
@@ -93,7 +88,7 @@ export default function GMPage() {
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState(null);
   const [players, setPlayers] = useState([]);
-  const [tiles, setTiles] = useState([]); // game_tiles
+  const [tiles, setTiles] = useState([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
@@ -112,8 +107,7 @@ export default function GMPage() {
     const m = new Map();
     for (const t of tiles) {
       const key = `${t.row}-${t.col}`;
-      // Solo mostramos objeto si NO está recogido
-      if (t?.looted_at) continue;
+      if (t?.is_collected) continue; // ✅ aquí
       const type = t?.loot_type;
       if (!type) continue;
       m.set(key, LOOT_EMOJI[type] || "🎁");
@@ -121,59 +115,10 @@ export default function GMPage() {
     return m;
   }, [tiles]);
 
-  async function boot() {
-    setLoading(true);
-    setError("");
-    setMsg("");
-
-    const { data: s } = await supabase.auth.getSession();
-    if (!s?.session) {
-      router.replace("/login");
-      return;
-    }
-
-    const { data: u } = await supabase.auth.getUser();
-    if (!u?.user) {
-      router.replace("/login");
-      return;
-    }
-
-    const { data: p, error: pErr } = await supabase
-      .from("players")
-      .select("*")
-      .eq("user_id", u.user.id)
-      .maybeSingle();
-
-    if (pErr || !p) {
-      setError(pErr?.message || "No existe tu perfil en players.");
-      setLoading(false);
-      return;
-    }
-
-    if (!p.is_gm) {
-      setError("No tienes permisos de GM.");
-      setLoading(false);
-      return;
-    }
-
-    if (!p.game_id) {
-      setError("No tienes una partida activa.");
-      setLoading(false);
-      return;
-    }
-
-    setMe(p);
-
-    await refreshAll(p.game_id);
-
-    setLoading(false);
-  }
-
   async function refreshAll(gameId) {
     setError("");
     setMsg("");
 
-    // 1) jugadores de la partida
     const { data: ps, error: psErr } = await supabase
       .from("players")
       .select("*")
@@ -186,13 +131,10 @@ export default function GMPage() {
     }
     setPlayers(ps || []);
 
-    // 2) objetos del mapa (game_tiles)
     const { data: ts, error: tsErr } = await supabase
       .from("game_tiles")
       .select("*")
-      .eq("game_id", gameId)
-      .order("row", { ascending: true })
-      .order("col", { ascending: true });
+      .eq("game_id", gameId);
 
     if (tsErr) {
       setError(tsErr.message);
@@ -223,9 +165,52 @@ export default function GMPage() {
   }
 
   useEffect(() => {
-    boot();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    (async () => {
+      setLoading(true);
+      setError("");
+      setMsg("");
+
+      const { data: s } = await supabase.auth.getSession();
+      if (!s?.session) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: u } = await supabase.auth.getUser();
+      if (!u?.user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: p, error: pErr } = await supabase
+        .from("players")
+        .select("*")
+        .eq("user_id", u.user.id)
+        .maybeSingle();
+
+      if (pErr || !p) {
+        setError(pErr?.message || "No existe tu perfil en players.");
+        setLoading(false);
+        return;
+      }
+
+      if (!p.is_gm) {
+        setError("No tienes permisos de GM.");
+        setLoading(false);
+        return;
+      }
+
+      if (!p.game_id) {
+        setError("No tienes una partida activa.");
+        setLoading(false);
+        return;
+      }
+
+      setMe(p);
+      await refreshAll(p.game_id);
+      setLoading(false);
+    })();
+  }, [router]);
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
@@ -242,15 +227,7 @@ export default function GMPage() {
 
       {!loading && me && (
         <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 18 }}>
-          {/* Panel jugadores */}
-          <div
-            style={{
-              border: "1px solid #eee",
-              borderRadius: 14,
-              padding: 14,
-              background: "#fff",
-            }}
-          >
+          <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <h2 style={{ margin: 0, fontSize: 16 }}>Jugadores ({players.length})</h2>
               <button
@@ -268,21 +245,17 @@ export default function GMPage() {
               </button>
             </div>
 
-            <p style={{ marginTop: 10, color: "#666" }}>
-              Arrastra un jugador y suéltalo en una casilla.
-            </p>
+            <p style={{ marginTop: 10, color: "#666" }}>Arrastra un jugador y suéltalo en una casilla.</p>
 
             <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
               {players.map((p) => {
-                const bullets = p?.bullets ?? 0; // ✅ NO usamos ammo
+                const bullets = p?.bullets ?? 0;
                 const inv = Array.isArray(p?.inventory) ? p.inventory : [];
                 return (
                   <div
                     key={p.id}
                     draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData("text/player_id", p.id);
-                    }}
+                    onDragStart={(e) => e.dataTransfer.setData("text/player_id", p.id)}
                     style={{
                       display: "flex",
                       gap: 10,
@@ -293,7 +266,6 @@ export default function GMPage() {
                       background: "#fff",
                       cursor: "grab",
                     }}
-                    title="Arrastra al tablero"
                   >
                     <div
                       style={{
@@ -312,13 +284,9 @@ export default function GMPage() {
                     </div>
 
                     <div style={{ lineHeight: 1.2 }}>
-                      <div style={{ fontWeight: 800 }}>
-                        {p.is_gm ? "GM " : ""}
-                        {p.name || "Player"}
-                      </div>
+                      <div style={{ fontWeight: 800 }}>{p.is_gm ? "GM " : ""}{p.name || "Player"}</div>
                       <div style={{ color: "#666", fontSize: 13 }}>
-                        ({p.row ?? "?"},{p.col ?? "?"}) · {p.alive ? "Vivo" : "Muerto"} ·
-                        vidas {p.lives ?? 0} · balas {bullets}
+                        ({p.row ?? "?"},{p.col ?? "?"}) · {p.alive ? "Vivo" : "Muerto"} · vidas {p.lives ?? 0} · balas {bullets}
                       </div>
                       <div style={{ color: "#666", fontSize: 12 }}>
                         inventario: {inv.length ? inv.join(", ") : "[]"}
@@ -330,15 +298,7 @@ export default function GMPage() {
             </div>
           </div>
 
-          {/* Tablero completo GM */}
-          <div
-            style={{
-              border: "1px solid #eee",
-              borderRadius: 14,
-              padding: 14,
-              background: "#fff",
-            }}
-          >
+          <div style={{ border: "1px solid #eee", borderRadius: 14, padding: 14, background: "#fff" }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Tablero completo (GM)</h2>
 
             <div
@@ -375,8 +335,7 @@ export default function GMPage() {
             </div>
 
             <p style={{ marginTop: 10, color: "#666" }}>
-              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina ·
-              🏍️ moto · 🪤 trampa · 🎁 loot (premio sorpresa)
+              Leyenda objetos: ❤️ vida · 🔫 balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa · 🎁 loot
             </p>
           </div>
         </div>
