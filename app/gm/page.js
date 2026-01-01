@@ -1,6 +1,5 @@
 "use client";
 
-import Nav from "../components/Nav";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
@@ -201,7 +200,7 @@ export default function GMPage() {
 
   return (
     <>
-      <Nav isGm={true} />
+      
 
       <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
         <h1 style={{ marginTop: 0 }}>GM</h1>
