@@ -1,10 +1,10 @@
 "use client";
 
+import Nav from "../components/Nav";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
-// Mapea el estado a lo que se ve en el tablero
 const SYMBOL = {
   unknown: "?",
   empty: "X",
@@ -56,6 +56,8 @@ export default function BoardPage() {
   const [player, setPlayer] = useState(null);
   const [tiles, setTiles] = useState([]);
   const [myMove, setMyMove] = useState(null);
+  const [inventory, setInventory] = useState([]); // ✅ inventario del jugador
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -73,6 +75,12 @@ export default function BoardPage() {
     if (error) return;
     const out = Array.isArray(data) ? data[0] : data;
     setMyMove(out || null);
+  }
+
+  async function loadInventory() {
+    const { data, error } = await supabase.rpc("player_get_inventory");
+    if (error) return;
+    setInventory(Array.isArray(data) ? data : []);
   }
 
   async function requestMove(toRow, toCol) {
@@ -141,10 +149,7 @@ export default function BoardPage() {
       }
     }
 
-    const { error: insErr } = await supabase
-      .from("player_map_tiles")
-      .insert(rows);
-
+    const { error: insErr } = await supabase.from("player_map_tiles").insert(rows);
     if (insErr) {
       setError(insErr.message);
       return;
@@ -190,7 +195,7 @@ export default function BoardPage() {
 
       if (!p) {
         if (mounted) {
-          setError("No existe tu perfil en players. Ve a /me para crearlo.");
+          setError("No existe tu perfil en players.");
           setLoading(false);
         }
         return;
@@ -200,6 +205,7 @@ export default function BoardPage() {
       setPlayer(p);
 
       await loadMyMove();
+      await loadInventory();
 
       if (!p.game_id) {
         setTiles([]);
@@ -252,89 +258,117 @@ export default function BoardPage() {
     );
   }
 
+  const invText =
+    inventory?.filter((x) => (x.qty ?? 0) > 0).length > 0
+      ? inventory
+          .filter((x) => (x.qty ?? 0) > 0)
+          .map((x) => `${x.object_type} x${x.qty}`)
+          .join(", ")
+      : "—";
+
   return (
-    <main style={{ fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
+    <>
+      <Nav isGm={!!player?.is_gm} />
 
-      {loading && <p>Cargando…</p>}
+      <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
+        <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
 
-      {!!error && (
-        <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          Error: {error}
-        </p>
-      )}
+        {loading && <p>Cargando…</p>}
 
-      {!!msg && (
-        <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
-          {msg}
-        </p>
-      )}
+        {!!error && (
+          <p style={{ color: "crimson", marginTop: 12, whiteSpace: "pre-wrap" }}>
+            Error: {error}
+          </p>
+        )}
 
-      {!loading && player && !player.game_id && (
-        <div style={{ marginTop: 12 }}>
-          <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
-        </div>
-      )}
+        {!!msg && (
+          <p style={{ color: "#1b4332", marginTop: 12, whiteSpace: "pre-wrap" }}>
+            {msg}
+          </p>
+        )}
 
-      {!loading && player?.game_id && (
-        <div style={{ marginTop: 18 }}>
-          {!player?.is_gm && (
-            <div style={{ marginBottom: 12, color: "#444" }}>
-              <p style={{ marginBottom: 6 }}>
-                <b>Solicitud pendiente:</b>{" "}
-                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
-              </p>
-              <p style={{ marginTop: 0, color: "#666" }}>
-                Para pedir movimiento: haz click en una casilla.
-              </p>
-            </div>
-          )}
-
+        {!loading && player && (
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${size}, 42px)`,
-              gap: 6,
+              marginTop: 12,
               padding: 12,
-              background: "#000",
+              border: "1px solid #eee",
               borderRadius: 12,
-              width: "fit-content",
+              background: "#fff",
+              maxWidth: 650,
             }}
           >
-            {Array.from({ length: size }).map((_, r0) =>
-              Array.from({ length: size }).map((__, c0) => {
-                const row = r0 + 1;
-                const col = c0 + 1;
-                const t = tilesByRC.get(`${row}-${col}`);
-                const state = t?.tile_state || "unknown";
-                const value = SYMBOL[state] || "?";
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Tu estado
+            </div>
+            <div style={{ color: "#333" }}>
+              <b>Vidas:</b> {player.lives ?? 0}{"  "}
+              <b>Balas:</b> {player.bullets ?? 0}{"  "}
+              <b>Inventario:</b> {invText}
+            </div>
 
-                const isMe =
-                  player?.row === row &&
-                  player?.col === col &&
-                  player?.alive === true;
-
-                return (
-                  <Cell
-                    key={`${row}-${col}`}
-                    isMe={isMe}
-                    value={value}
-                    label={`(${row}, ${col}) state=${state}`}
-                    onSet={(newState) => setTileState(row, col, newState)}
-                  />
-                );
-              })
+            {!player?.is_gm && (
+              <div style={{ marginTop: 8, color: "#444" }}>
+                <b>Solicitud pendiente:</b>{" "}
+                {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+              </div>
             )}
           </div>
+        )}
 
-          <p style={{ marginTop: 12, color: "#666" }}>
-            Jugador: click = solicitar movimiento.
-            <br />
-            GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔,
-            doble click = ?
-          </p>
-        </div>
-      )}
-    </main>
+        {!loading && player && !player.game_id && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ color: "#444" }}>Aún no estás unido a una partida.</p>
+          </div>
+        )}
+
+        {!loading && player?.game_id && (
+          <div style={{ marginTop: 18 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${size}, 42px)`,
+                gap: 6,
+                padding: 12,
+                background: "#000",
+                borderRadius: 12,
+                width: "fit-content",
+              }}
+            >
+              {Array.from({ length: size }).map((_, r0) =>
+                Array.from({ length: size }).map((__, c0) => {
+                  const row = r0 + 1;
+                  const col = c0 + 1;
+                  const t = tilesByRC.get(`${row}-${col}`);
+                  const state = t?.tile_state || "unknown";
+                  const value = SYMBOL[state] || "?";
+
+                  const isMe =
+                    player?.row === row &&
+                    player?.col === col &&
+                    player?.alive === true;
+
+                  return (
+                    <Cell
+                      key={`${row}-${col}`}
+                      isMe={isMe}
+                      value={value}
+                      label={`(${row}, ${col}) state=${state}`}
+                      onSet={(newState) => setTileState(row, col, newState)}
+                    />
+                  );
+                })
+              )}
+            </div>
+
+            <p style={{ marginTop: 12, color: "#666" }}>
+              Jugador: click = solicitar movimiento.
+              <br />
+              GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔, doble click = ?
+            </p>
+          </div>
+        )}
+      </main>
+    </>
   );
 }
