@@ -165,7 +165,7 @@ export default function GMPage() {
       return;
     }
 
-    setMsg(`✅ Partida NUEVA creada.\nCódigo: ${out.code}`);
+    setMsg(`✅ Partida NUEVA creada.\nCódigo: ${out.game_code}`);
     await refreshAll(out.game_id);
   }
 
