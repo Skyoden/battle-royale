@@ -4,13 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
-// Mapea el estado a lo que se ve en el tablero (tu mapa personal GM)
 const SYMBOL = {
   unknown: "?",
   empty: "X",
   corpse: "†",
   blocked: "⛔",
   loot: "★",
+};
+
+const LOOT_EMOJI = {
+  life: "❤️",
+  bullet: "🔫",
+  binoculars: "🔭",
+  vest: "🦺",
+  gas: "⛽",
+  bike: "🏍️",
+  trap: "🪤",
+  loot: "🎁",
 };
 
 function Cell({ isMe, value, label, onSet }) {
@@ -187,7 +197,7 @@ export default function BoardPage() {
 
       if (!p) {
         if (mounted) {
-          setError("No existe tu perfil en players.");
+          setError("No existe tu perfil en players. Ve a /me para crearlo.");
           setLoading(false);
         }
         return;
@@ -228,7 +238,7 @@ export default function BoardPage() {
       return;
     }
 
-    // GM: edita su mapa personal
+    // GM: edita su mapa personal (click izq, der, doble, shift)
     const { error: uErr } = await supabase
       .from("player_map_tiles")
       .update({ tile_state: state })
@@ -249,9 +259,20 @@ export default function BoardPage() {
     );
   }
 
+  const bullets = player?.bullets ?? 0;
+  const lives = player?.lives ?? 0;
+  const inv = Array.isArray(player?.inventory) ? player.inventory : [];
+
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, -apple-system" }}>
-      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM" : "Tablero"}</h1>
+      <h1 style={{ marginBottom: 8 }}>{player?.is_gm ? "GM (Tablero personal)" : "Tablero"}</h1>
+
+      {!loading && player && (
+        <div style={{ marginBottom: 10, color: "#444" }}>
+          <b>Estado:</b> ❤️ vidas {lives} · 🔫 balas {bullets} · 🎒 inventario{" "}
+          {inv.length ? inv.join(", ") : "[]"}
+        </div>
+      )}
 
       {loading && <p>Cargando…</p>}
 
@@ -329,7 +350,10 @@ export default function BoardPage() {
             <br />
             GM (mapa personal): click = X, click derecho = †, Shift+click = ⛔, doble click = ?
             <br />
-            Objetos (referencia): 🔫(1/2/3) balas · 🔭 binoculares · 🦺 chaleco · ⛽ bencina · 🏍️ moto · 🪤 trampa
+            Objetos (referencia):{" "}
+            {Object.entries(LOOT_EMOJI)
+              .map(([k, v]) => `${v} ${k}`)
+              .join(" · ")}
           </p>
         </div>
       )}
