@@ -12,6 +12,13 @@ const SYMBOL = {
   loot: "★",
 };
 
+function gmObjectEmoji(type) {
+  if (type === "life") return "❤️";
+  if (type === "bullet") return "🔫"; // si quieres más neutro: "🎯"
+  if (type === "loot") return "🎁";
+  return "★";
+}
+
 function Cell({ isMe, value, label, onClick }) {
   return (
     <div
@@ -48,7 +55,7 @@ export default function BoardPage() {
   const [tiles, setTiles] = useState([]);
   const [myMove, setMyMove] = useState(null);
   const [inventory, setInventory] = useState([]);
-  const [gmObjects, setGmObjects] = useState([]); // ✅ objetos del mapa (solo GM)
+  const [gmObjects, setGmObjects] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -248,15 +255,12 @@ export default function BoardPage() {
 
     if (!player?.game_id) return;
 
-    // Jugador: click = solicitar movimiento
     if (!player?.is_gm) {
       await requestMove(row, col);
       return;
     }
 
-    // GM: mantiene lo anterior (marcar casillas de su mapa personal)
-    const state =
-      e.shiftKey ? "blocked" : "empty"; // click normal: empty, shift: blocked
+    const state = e.shiftKey ? "blocked" : "empty";
 
     const { error: uErr } = await supabase
       .from("player_map_tiles")
@@ -307,8 +311,7 @@ export default function BoardPage() {
         >
           <div style={{ fontWeight: 800, marginBottom: 6 }}>Tu estado</div>
           <div style={{ color: "#333" }}>
-            <b>Vidas:</b> {player.lives ?? 0}{" "}
-            <b>Balas:</b> {player.bullets ?? 0}{" "}
+            <b>Vidas:</b> {player.lives ?? 0} <b>Balas:</b> {player.bullets ?? 0}{" "}
             <b>Inventario:</b> {invText()}
           </div>
 
@@ -316,6 +319,12 @@ export default function BoardPage() {
             <div style={{ marginTop: 8, color: "#444" }}>
               <b>Solicitud pendiente:</b>{" "}
               {myMove ? `(${myMove.to_row}, ${myMove.to_col})` : "ninguna"}
+            </div>
+          )}
+
+          {player?.is_gm && (
+            <div style={{ marginTop: 8, color: "#666" }}>
+              Leyenda GM: ❤️ vida, 🔫 bala, 🎁 loot
             </div>
           )}
         </div>
@@ -349,9 +358,9 @@ export default function BoardPage() {
                 const state = t?.tile_state || "unknown";
                 let value = SYMBOL[state] || "?";
 
-                // ✅ GM: mostrar objetos sin reclamar como ★
                 if (player?.is_gm) {
-                  if (objectsByRC.has(`${row}-${col}`)) value = "★";
+                  const obj = objectsByRC.get(`${row}-${col}`);
+                  if (obj) value = gmObjectEmoji(obj.object_type);
                 }
 
                 const isMe =
@@ -375,7 +384,7 @@ export default function BoardPage() {
           <p style={{ marginTop: 12, color: "#666" }}>
             Jugador: click = solicitar movimiento.
             <br />
-            GM: ★ = objeto en la casilla (solo GM lo ve).
+            GM: ❤️/🔫/🎁 = objeto en la casilla (solo GM lo ve).
           </p>
         </div>
       )}
